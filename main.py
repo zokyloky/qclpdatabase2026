@@ -96,62 +96,18 @@ def login(req: LoginRequest):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def compute_badge(row: dict) -> str:
-    """Derive status badge from firm stats."""
-    approved   = row.get("approved_count", 0) or 0
-    dynamo_cnt = row.get("dynamo_count", 0) or 0
-    pending    = row.get("pending_count", 0) or 0
-    selected   = row.get("selected_count", 0) or 0
-    last_out   = row.get("last_outreach_date")
+VALID_WORKFLOW_STATUSES = ("unreviewed", "in_progress", "complete", "needs_attention")
 
-    if approved == 0 and dynamo_cnt == 0:
-        return "no_contacts"
-    if pending > 0:
-        return "needs_review"
-    if last_out:
-        try:
-            d = datetime.fromisoformat(str(last_out))
-            days_ago = (datetime.now() - d.replace(tzinfo=None)).days
-            if days_ago <= OVERDUE_DAYS:
-                return "active"
-            elif selected > 0:
-                return "overdue"
-        except Exception:
-            pass
-    if selected > 0:
-        return "ready"
-    return "no_contacts"
-
-
-FIRMS_BASE_SQL = """
-WITH firm_stats AS (
-    SELECT
-        lp_firm_id,
-        COUNT(*) FILTER (WHERE filter_status = 'approved' AND is_active = 1)       AS approved_count,
-        COUNT(*) FILTER (WHERE filter_status = 'dynamo'   AND is_active = 1)       AS dynamo_count,
-        COUNT(*) FILTER (WHERE filter_status = 'pending_review' AND is_active = 1) AS pending_count,
-        COUNT(*) FILTER (WHERE is_selected = 1 AND is_active = 1)                  AS selected_count
-    FROM lp_contacts
-    GROUP BY lp_firm_id
-),
-outreach_stats AS (
-    SELECT lp_firm_id, MAX(outreach_date) AS last_outreach_date
-    FROM outreach_log
-    GROUP BY lp_firm_id
-)
-SELECT
-    f.id, f.lp_name, f.display_name, f.institution_type, f.country, f.region,
-    f.source, f.investor_status, f.aum_usd_mn, f.last_activity_date,
-    f.dynamo_internal_id, f.preqin_firm_id, f.entity_type,
-    COALESCE(cs.approved_count, 0)  AS approved_count,
-    COALESCE(cs.dynamo_count, 0)    AS dynamo_count,
-    COALESCE(cs.pending_count, 0)   AS pending_count,
-    COALESCE(cs.selected_count, 0)  AS selected_count,
-    os.last_outreach_date
-FROM lp_firms f
-LEFT JOIN firm_stats cs    ON cs.lp_firm_id = f.id
-LEFT JOIN outreach_stats os ON os.lp_firm_id = f.id
-WHERE f.is_active = 1
+# Status priority for default sort: needs_attention first, then unreviewed,
+# in_progress, complete, and no-contact firms last.
+WORKFLOW_SORT_PRIORITY = """
+CASE f.workflow_status
+    WHEN 'needs_attention' THEN 1
+    WHEN 'unreviewed'      THEN 2
+    WHEN 'in_progress'     THEN 3
+    WHEN 'complete'        THEN 4
+    ELSE 5
+END
 """
 
 
@@ -163,20 +119,18 @@ def list_firms(
     institution_type: Optional[str]  = Query(None),
     region:           Optional[str]  = Query(None),
     investor_status:  Optional[str]  = Query(None),
-    status_badge:     Optional[str]  = Query(None),
+    workflow_status:  Optional[str]  = Query(None),
     page:             int            = Query(1, ge=1),
     per_page:         int            = Query(50, ge=1, le=200),
-    sort_by:          str            = Query("lp_name"),
+    sort_by:          str            = Query("workflow_priority"),
     sort_dir:         str            = Query("asc"),
     db = Depends(get_db),
 ):
     where_clauses = ["f.is_active = 1"]
-    params = []
+    params: List = []
 
     if search:
-        where_clauses.append(
-            "(f.lp_name ILIKE %s OR f.display_name ILIKE %s)"
-        )
+        where_clauses.append("(f.lp_name ILIKE %s OR f.display_name ILIKE %s)")
         q = f"%{search}%"
         params += [q, q]
 
@@ -196,27 +150,39 @@ def list_firms(
         where_clauses.append("f.investor_status = %s")
         params.append(investor_status)
 
+    if workflow_status:
+        if workflow_status == "no_contacts":
+            # Derived state: firms with zero available contacts
+            where_clauses.append(
+                "COALESCE(cs.approved_count, 0) + COALESCE(cs.dynamo_count, 0) = 0"
+            )
+        elif workflow_status in VALID_WORKFLOW_STATUSES:
+            where_clauses.append("f.workflow_status = %s")
+            params.append(workflow_status)
+
     where_sql = "WHERE " + " AND ".join(where_clauses)
 
-    # Allowed sort columns to prevent injection
+    # Allowed sort columns — workflow_priority uses the CASE expression
     sort_col_map = {
+        "workflow_priority": WORKFLOW_SORT_PRIORITY,
         "lp_name":           "f.lp_name",
         "selected_count":    "selected_count",
+        "available_count":   "available_count",
         "last_outreach":     "os.last_outreach_date",
         "institution_type":  "f.institution_type",
         "country":           "f.country",
     }
-    sort_col = sort_col_map.get(sort_by, "f.lp_name")
+    sort_col = sort_col_map.get(sort_by, WORKFLOW_SORT_PRIORITY)
     sort_dir_sql = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
     base = f"""
     WITH firm_stats AS (
         SELECT
             lp_firm_id,
-            COUNT(*) FILTER (WHERE filter_status = 'approved' AND is_active = 1)       AS approved_count,
-            COUNT(*) FILTER (WHERE filter_status = 'dynamo'   AND is_active = 1)       AS dynamo_count,
+            COUNT(*) FILTER (WHERE filter_status = 'approved'       AND is_active = 1) AS approved_count,
+            COUNT(*) FILTER (WHERE filter_status = 'dynamo'         AND is_active = 1) AS dynamo_count,
             COUNT(*) FILTER (WHERE filter_status = 'pending_review' AND is_active = 1) AS pending_count,
-            COUNT(*) FILTER (WHERE is_selected = 1 AND is_active = 1)                  AS selected_count
+            COUNT(*) FILTER (WHERE is_selected = 1                  AND is_active = 1) AS selected_count
         FROM lp_contacts GROUP BY lp_firm_id
     ),
     outreach_stats AS (
@@ -224,50 +190,42 @@ def list_firms(
         FROM outreach_log GROUP BY lp_firm_id
     )
     SELECT
-        f.id, f.lp_name, f.display_name, f.institution_type, f.country, f.region,
-        f.source, f.investor_status, f.aum_usd_mn,
-        COALESCE(cs.approved_count, 0) AS approved_count,
-        COALESCE(cs.dynamo_count,   0) AS dynamo_count,
-        COALESCE(cs.pending_count,  0) AS pending_count,
-        COALESCE(cs.selected_count, 0) AS selected_count,
+        f.id, f.lp_name, f.display_name, f.institution_type,
+        f.country, f.city, f.region, f.source, f.investor_status, f.aum_usd_mn,
+        f.workflow_status, f.workflow_completed_at, f.review_reason,
+        COALESCE(cs.approved_count, 0)                                        AS approved_count,
+        COALESCE(cs.dynamo_count,   0)                                        AS dynamo_count,
+        COALESCE(cs.pending_count,  0)                                        AS pending_count,
+        COALESCE(cs.selected_count, 0)                                        AS selected_count,
+        COALESCE(cs.approved_count, 0) + COALESCE(cs.dynamo_count, 0)        AS available_count,
         os.last_outreach_date
     FROM lp_firms f
-    LEFT JOIN firm_stats cs    ON cs.lp_firm_id = f.id
+    LEFT JOIN firm_stats cs     ON cs.lp_firm_id = f.id
     LEFT JOIN outreach_stats os ON os.lp_firm_id = f.id
     {where_sql}
     """
 
-    # Count total
     with dict_cursor(db) as cur:
         cur.execute(f"SELECT COUNT(*) AS total FROM ({base}) sub", params)
         total = cur.fetchone()["total"]
 
-    # Paginated data
-    data_sql = (
-        base
-        + f" ORDER BY {sort_col} {sort_dir_sql} NULLS LAST"
-        + " LIMIT %s OFFSET %s"
-    )
+    # Default sort: workflow priority, then alphabetical within group
+    if sort_col == WORKFLOW_SORT_PRIORITY:
+        order_clause = f"ORDER BY {sort_col} ASC, f.lp_name ASC NULLS LAST"
+    else:
+        order_clause = f"ORDER BY {sort_col} {sort_dir_sql} NULLS LAST"
+
+    data_sql = base + f" {order_clause} LIMIT %s OFFSET %s"
     with dict_cursor(db) as cur:
         cur.execute(data_sql, params + [per_page, (page - 1) * per_page])
-        rows = cur.fetchall()
-
-    # Apply status_badge filter (computed, not DB column)
-    result = []
-    for r in rows:
-        d = dict(r)
-        d["status_badge"] = compute_badge(d)
-        result.append(d)
-
-    if status_badge:
-        result = [r for r in result if r["status_badge"] == status_badge]
+        rows = [dict(r) for r in cur.fetchall()]
 
     return {
-        "total": total,
-        "page": page,
+        "total":    total,
+        "page":     page,
         "per_page": per_page,
-        "pages": max(1, (total + per_page - 1) // per_page),
-        "firms": result,
+        "pages":    max(1, (total + per_page - 1) // per_page),
+        "firms":    rows,
     }
 
 
@@ -276,7 +234,17 @@ def list_firms(
 def get_firm(firm_id: str, db=Depends(get_db)):
     with dict_cursor(db) as cur:
         cur.execute(
-            "SELECT * FROM lp_firms WHERE id = %s AND is_active = 1", (firm_id,)
+            """
+            SELECT f.*,
+                COUNT(c.id) FILTER (WHERE c.filter_status IN ('approved','dynamo') AND c.is_active = 1) AS available_count,
+                COUNT(c.id) FILTER (WHERE c.is_selected = 1 AND c.is_active = 1)                        AS selected_count,
+                COUNT(c.id) FILTER (WHERE c.filter_status = 'pending_review' AND c.is_active = 1)       AS pending_count
+            FROM lp_firms f
+            LEFT JOIN lp_contacts c ON c.lp_firm_id = f.id
+            WHERE f.id = %s AND f.is_active = 1
+            GROUP BY f.id
+            """,
+            (firm_id,),
         )
         firm = cur.fetchone()
     if not firm:
@@ -341,12 +309,24 @@ def update_contact(contact_id: str, update: ContactUpdate, db=Depends(get_db)):
     params.append(now)
     params.append(contact_id)
 
-    sql = f"UPDATE lp_contacts SET {', '.join(fields)} WHERE id = %s RETURNING id"
+    sql = f"UPDATE lp_contacts SET {', '.join(fields)} WHERE id = %s RETURNING id, lp_firm_id"
     with dict_cursor(db) as cur:
         cur.execute(sql, params)
         row = cur.fetchone()
         if not row:
             raise HTTPException(404, "Contact not found")
+
+        # Auto-advance firm to in_progress when user makes their first selection
+        if update.is_selected == 1:
+            cur.execute(
+                """
+                UPDATE lp_firms
+                SET workflow_status = 'in_progress', updated_at = %s
+                WHERE id = %s AND workflow_status = 'unreviewed'
+                """,
+                (now, row["lp_firm_id"]),
+            )
+
         db.commit()
     return {"id": contact_id, "updated": True}
 
@@ -899,6 +879,89 @@ def update_firm(firm_id: str, update: FirmUpdate, db=Depends(get_db)):
     return {"updated": True}
 
 
+# ── Firm workflow status ───────────────────────────────────────────────────────
+class FirmStatusUpdate(BaseModel):
+    workflow_status: str
+    review_reason:   Optional[str] = None
+
+
+@app.patch("/api/firms/{firm_id}/status", dependencies=[Depends(verify_token)])
+def update_firm_status(firm_id: str, update: FirmStatusUpdate, db=Depends(get_db)):
+    if update.workflow_status not in VALID_WORKFLOW_STATUSES:
+        raise HTTPException(400, f"workflow_status must be one of {VALID_WORKFLOW_STATUSES}")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Set completed_at only when transitioning to 'complete'; clear it on reopen
+    if update.workflow_status == "complete":
+        completed_at_sql = "workflow_completed_at = %s,"
+        completed_at_val = now
+    else:
+        completed_at_sql = "workflow_completed_at = NULL,"
+        completed_at_val = None
+
+    with dict_cursor(db) as cur:
+        if completed_at_val is not None:
+            cur.execute(
+                f"""
+                UPDATE lp_firms
+                SET workflow_status = %s,
+                    {completed_at_sql}
+                    review_reason   = %s,
+                    updated_at      = %s
+                WHERE id = %s AND is_active = 1
+                RETURNING id
+                """,
+                (update.workflow_status, completed_at_val,
+                 update.review_reason, now, firm_id),
+            )
+        else:
+            cur.execute(
+                f"""
+                UPDATE lp_firms
+                SET workflow_status = %s,
+                    {completed_at_sql}
+                    review_reason   = %s,
+                    updated_at      = %s
+                WHERE id = %s AND is_active = 1
+                RETURNING id
+                """,
+                (update.workflow_status,
+                 update.review_reason, now, firm_id),
+            )
+        if not cur.fetchone():
+            raise HTTPException(404, "Firm not found")
+        db.commit()
+    return {"id": firm_id, "workflow_status": update.workflow_status}
+
+
+# ── Global settings ────────────────────────────────────────────────────────────
+@app.get("/api/settings", dependencies=[Depends(verify_token)])
+def get_settings(db=Depends(get_db)):
+    with dict_cursor(db) as cur:
+        cur.execute("SELECT key, value FROM global_settings")
+        return {r["key"]: r["value"] for r in cur.fetchall()}
+
+
+class SettingsUpdate(BaseModel):
+    max_contacts_per_firm: Optional[int] = None
+
+
+@app.patch("/api/settings", dependencies=[Depends(verify_token)])
+def update_settings(update: SettingsUpdate, db=Depends(get_db)):
+    if update.max_contacts_per_firm is not None:
+        if update.max_contacts_per_firm < 1:
+            raise HTTPException(400, "max_contacts_per_firm must be at least 1")
+        with dict_cursor(db) as cur:
+            cur.execute(
+                "INSERT INTO global_settings (key, value) VALUES ('max_contacts_per_firm', %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (str(update.max_contacts_per_firm),),
+            )
+            db.commit()
+    return {"updated": True}
+
+
 # ── Dropdown options ──────────────────────────────────────────────────────────
 @app.get("/api/options", dependencies=[Depends(verify_token)])
 def get_options(db=Depends(get_db)):
@@ -919,7 +982,7 @@ def get_options(db=Depends(get_db)):
         "countries": countries,
         "sources":   ["both", "dynamo_only", "preqin_only"],
         "investor_statuses": ["Active LP", "Prospect"],
-        "status_badges": ["no_contacts", "needs_review", "ready", "active", "overdue"],
+        "workflow_statuses": list(VALID_WORKFLOW_STATUSES) + ["no_contacts"],
     }
 
 
@@ -929,12 +992,16 @@ def get_stats(db=Depends(get_db)):
     with dict_cursor(db) as cur:
         cur.execute("""
             SELECT
-                (SELECT COUNT(*) FROM lp_firms WHERE is_active = 1)              AS total_firms,
-                (SELECT COUNT(*) FROM lp_contacts WHERE is_active = 1)           AS total_contacts,
-                (SELECT COUNT(*) FROM lp_contacts WHERE filter_status='approved' AND is_active=1) AS approved,
-                (SELECT COUNT(*) FROM lp_contacts WHERE is_selected=1 AND is_active=1)            AS selected,
-                (SELECT COUNT(*) FROM lp_contacts WHERE filter_status='pending_review' AND is_active=1) AS pending_review,
-                (SELECT COUNT(*) FROM outreach_log)                              AS outreach_entries
+                (SELECT COUNT(*) FROM lp_firms WHERE is_active = 1)                                         AS total_firms,
+                (SELECT COUNT(*) FROM lp_firms WHERE workflow_status = 'unreviewed'      AND is_active = 1)  AS firms_unreviewed,
+                (SELECT COUNT(*) FROM lp_firms WHERE workflow_status = 'in_progress'     AND is_active = 1)  AS firms_in_progress,
+                (SELECT COUNT(*) FROM lp_firms WHERE workflow_status = 'complete'        AND is_active = 1)  AS firms_complete,
+                (SELECT COUNT(*) FROM lp_firms WHERE workflow_status = 'needs_attention' AND is_active = 1)  AS firms_needs_attention,
+                (SELECT COUNT(*) FROM lp_contacts WHERE is_active = 1)                                       AS total_contacts,
+                (SELECT COUNT(*) FROM lp_contacts WHERE filter_status = 'approved'       AND is_active = 1)  AS approved,
+                (SELECT COUNT(*) FROM lp_contacts WHERE is_selected = 1                 AND is_active = 1)   AS selected,
+                (SELECT COUNT(*) FROM lp_contacts WHERE filter_status = 'pending_review' AND is_active = 1)  AS pending_review,
+                (SELECT COUNT(*) FROM outreach_log)                                                          AS outreach_entries
         """)
         return dict(cur.fetchone())
 

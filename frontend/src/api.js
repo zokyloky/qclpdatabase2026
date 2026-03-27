@@ -67,8 +67,15 @@ export function getFirms(params = {}) {
   return get(`/firms${q ? '?' + q : ''}`)
 }
 
-export function getFirm(id)       { return get(`/firms/${id}`) }
-export function updateFirm(id, u) { return patch(`/firms/${id}`, u) }
+export function getFirm(id)                  { return get(`/firms/${id}`) }
+export function updateFirm(id, u)            { return patch(`/firms/${id}`, u) }
+export function updateFirmStatus(id, status, reason) {
+  return patch(`/firms/${id}/status`, { workflow_status: status, review_reason: reason ?? null })
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+export function getSettings()    { return get('/settings') }
+export function updateSettings(u){ return patch('/settings', u) }
 
 // ── Contacts ──────────────────────────────────────────────────────────────────
 export function getFirmContacts(firmId)     { return get(`/firms/${firmId}/contacts`) }
