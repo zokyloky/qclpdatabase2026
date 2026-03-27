@@ -2,6 +2,7 @@ services:
   - type: web
     name: lp-intelligence
     runtime: python
+    pythonVersion: "3.12.0"
     buildCommand: |
       pip install -r requirements.txt
       cd frontend
