@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: lp-intelligence
+    runtime: python
+    buildCommand: |
+      pip install -r requirements.txt
+      cd frontend
+      npm install
+      npm run build
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_PASSWORD
+        sync: false        # Set manually in Render dashboard
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false        # Set manually in Render dashboard
+      - key: OVERDUE_DAYS
+        value: "180"
+    healthCheckPath: /api/docs
