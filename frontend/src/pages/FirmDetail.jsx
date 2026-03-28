@@ -5,6 +5,14 @@ import {
 } from '../api'
 import StatusBadge from '../components/StatusBadge'
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+// Ensure a URL has a proper protocol prefix so it doesn't resolve relative to the app
+function normalizeUrl(url) {
+  if (!url) return null
+  if (/^https?:\/\//i.test(url)) return url
+  return 'https://' + url
+}
+
 // ── Inline icon components (no external file dependency) ──────────────────────
 function EmailIcon({ className = 'w-5 h-5' }) {
   return (
@@ -41,10 +49,11 @@ function Tooltip({ text, children }) {
 }
 
 // ── Single contact row in the Available tab ────────────────────────────────────
-function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxContacts }) {
+function AvailableContactRow({ contact, onToggle, onExclude, nonDynamoSelectedCount, maxContacts }) {
   const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ')
   const isSelected = contact.is_selected === 1
   const isDynamo = contact.source === 'dynamo'
+  const [excluding, setExcluding] = useState(false)
 
   // Cap only applies to non-Dynamo contacts
   const atCap = !isDynamo && nonDynamoSelectedCount >= maxContacts && !isSelected
@@ -52,6 +61,14 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
   function handleSelect() {
     if (isDynamo) return  // Dynamo contacts are auto-accepted, not manually toggled
     onToggle(contact.id, isSelected ? 0 : 1)
+  }
+
+  async function handleExclude(e) {
+    e.stopPropagation()
+    if (!onExclude) return
+    setExcluding(true)
+    try { await onExclude(contact.id) }
+    finally { setExcluding(false) }
   }
 
   return (
@@ -93,7 +110,7 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
       <td className="px-4 py-3 text-center">
         {contact.linkedin_url
           ? <Tooltip text="View LinkedIn profile">
-              <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer"
+              <a href={normalizeUrl(contact.linkedin_url)} target="_blank" rel="noopener noreferrer"
                  onClick={e => e.stopPropagation()}
                  className="inline-flex items-center justify-center text-qgray-400 hover:text-[#0077B5] transition-colors">
                 <LinkedInIcon className="w-4 h-4" />
@@ -123,26 +140,39 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
               ✓ Auto-accepted
             </span>
           </Tooltip>
-        ) : isSelected ? (
-          <button
-            onClick={handleSelect}
-            className="text-xs px-3 py-1.5 rounded border border-qgreen-600 bg-qgreen-700 text-white font-semibold hover:bg-qgreen-800 active:bg-qgreen-900 transition-colors whitespace-nowrap"
-          >
-            ✓ Shortlisted
-          </button>
         ) : (
-          <Tooltip text={atCap ? `Cap of ${maxContacts} reached — remove another first.` : 'Add to shortlist'}>
-            <button
-              onClick={handleSelect}
-              disabled={atCap}
-              className={`text-xs px-3 py-1.5 rounded border font-medium transition-colors disabled:opacity-40 whitespace-nowrap
-                ${atCap
-                  ? 'border-qgray-200 text-qgray-300 cursor-not-allowed'
-                  : 'border-qgray-300 text-qgray-600 hover:border-qgreen-500 hover:text-qgreen-700 hover:bg-qgreen-50'}`}
-            >
-              + Shortlist
-            </button>
-          </Tooltip>
+          <div className="flex items-center justify-end gap-1.5">
+            {isSelected ? (
+              <button
+                onClick={handleSelect}
+                className="text-xs px-3 py-1.5 rounded border border-qgreen-600 bg-qgreen-700 text-white font-semibold hover:bg-qgreen-800 active:bg-qgreen-900 transition-colors whitespace-nowrap"
+              >
+                ✓ Shortlisted
+              </button>
+            ) : (
+              <Tooltip text={atCap ? `Cap of ${maxContacts} reached — remove another first.` : 'Add to shortlist'}>
+                <button
+                  onClick={handleSelect}
+                  disabled={atCap}
+                  className={`text-xs px-3 py-1.5 rounded border font-medium transition-colors disabled:opacity-40 whitespace-nowrap
+                    ${atCap
+                      ? 'border-qgray-200 text-qgray-300 cursor-not-allowed'
+                      : 'border-qgray-300 text-qgray-600 hover:border-qgreen-500 hover:text-qgreen-700 hover:bg-qgreen-50'}`}
+                >
+                  + Shortlist
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip text="Exclude this contact — removes them from the available list permanently.">
+              <button
+                onClick={handleExclude}
+                disabled={excluding}
+                className="text-xs px-2 py-1.5 rounded border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 hover:text-red-700 transition-colors disabled:opacity-40 whitespace-nowrap"
+              >
+                {excluding ? '…' : 'Exclude'}
+              </button>
+            </Tooltip>
+          </div>
         )}
       </td>
     </tr>
@@ -178,7 +208,7 @@ function PendingContactRow({ contact, onStatusChange }) {
           </button>
           <button onClick={() => handleStatus('blacklisted')} disabled={saving}
             className="text-xs px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded hover:bg-red-100 transition-colors disabled:opacity-50">
-            Exclude
+            Reject
           </button>
         </div>
       </td>
@@ -318,7 +348,12 @@ export default function FirmDetail() {
 
   async function handleStatusChange(contactId, status) {
     await updateContact(contactId, { filter_status: status })
-    setContacts(cs => cs.map(c => c.id === contactId ? { ...c, filter_status: status } : c))
+    setContacts(cs => cs.map(c => c.id === contactId ? { ...c, filter_status: status, is_selected: 0 } : c))
+  }
+
+  async function handleExclude(contactId) {
+    await updateContact(contactId, { filter_status: 'blacklisted' })
+    setContacts(cs => cs.map(c => c.id === contactId ? { ...c, filter_status: 'blacklisted', is_selected: 0 } : c))
   }
 
   async function handleMarkComplete() {
@@ -675,7 +710,7 @@ export default function FirmDetail() {
                         </button>
                       </Tooltip>
                     </th>
-                    <th className="px-4 py-2.5 w-36"></th>
+                    <th className="px-4 py-2.5 w-52"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -701,7 +736,8 @@ export default function FirmDetail() {
                           </tr>
                           {filteredDynamo.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
-                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts} />
+                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
+                              onExclude={handleExclude} />
                           ))}
                         </>
                       )}
@@ -718,7 +754,8 @@ export default function FirmDetail() {
                           </tr>
                           {filteredSelected.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
-                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts} />
+                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
+                              onExclude={handleExclude} />
                           ))}
                         </>
                       )}
@@ -740,7 +777,8 @@ export default function FirmDetail() {
                           )}
                           {filteredUnselected.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
-                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts} />
+                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
+                              onExclude={handleExclude} />
                           ))}
                         </>
                       )}

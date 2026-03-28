@@ -342,10 +342,19 @@ export default function FirmList() {
     return firm.workflow_status
   }
 
-  // Filter countries/cities based on selected region (if region is set)
+  // Cascade: countries filtered by region, cities filtered by country
   const filteredCountries = region && options.countryByRegion
-    ? (options.countryByRegion[region] || options.countries)
+    ? (options.countryByRegion[region] || [])
     : options.countries || []
+
+  const filteredCities = country && options.cityByCountry
+    ? (options.cityByCountry[country] || [])
+    : region && options.countryByRegion
+      ? Object.entries(options.cityByCountry || {})
+          .filter(([c]) => (options.countryByRegion[region] || []).includes(c))
+          .flatMap(([, cities]) => cities)
+          .sort()
+      : options.cities || []
 
   return (
     <div className="space-y-4 h-full">
@@ -353,15 +362,15 @@ export default function FirmList() {
       {/* Stats bar */}
       <StatsBar stats={stats} />
 
-      {/* Filter bar */}
-      <div className="filter-bar">
-        {/* Search row */}
-        <div className="flex flex-wrap gap-3 items-end">
-          <div className="flex flex-col gap-0.5 flex-1 min-w-48">
+      {/* Filter bar — single compact row */}
+      <div className="filter-bar space-y-2">
+        <div className="flex flex-wrap gap-2 items-end">
+          {/* Search — kept short */}
+          <div className="flex flex-col gap-0.5 w-40 flex-shrink-0">
             <label className="text-2xs font-semibold text-qgray-500 uppercase tracking-wider px-0.5">Search</label>
             <input
               type="search"
-              placeholder="Search firms…"
+              placeholder="Firm name…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="input text-sm"
@@ -388,10 +397,24 @@ export default function FirmList() {
             <option value="preqin_only">Preqin only</option>
           </FilterSelect>
 
+          {/* Geography — inline */}
+          <FilterSelect label="Region" value={region} onChange={v => { setRegion(v); setCountry(''); setCity('') }} placeholder="All Regions">
+            {(options.regions || []).map(r => <option key={r} value={r}>{r}</option>)}
+          </FilterSelect>
+
+          <FilterSelect label="Country" value={country} onChange={v => { setCountry(v); setCity('') }} placeholder={region ? 'All Countries' : 'All Countries'}>
+            {filteredCountries.map(c => <option key={c} value={c}>{c}</option>)}
+          </FilterSelect>
+
+          <FilterSelect label="City" value={city} onChange={setCity} placeholder="All Cities">
+            {filteredCities.map(c => <option key={c} value={c}>{c}</option>)}
+          </FilterSelect>
+
+          {/* Actions */}
           <div className="flex items-end gap-2 ml-auto flex-shrink-0">
             {activeFilterCount > 0 && (
               <button onClick={clearFilters} className="text-sm text-qgreen-700 hover:text-qgreen-800 font-medium py-2 whitespace-nowrap">
-                Clear filters ({activeFilterCount})
+                Clear ({activeFilterCount})
               </button>
             )}
             <button
@@ -404,27 +427,8 @@ export default function FirmList() {
           </div>
         </div>
 
-        {/* Geography row */}
-        <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-qgray-100">
-          <div className="flex items-center gap-1.5 text-2xs font-semibold text-qgray-500 uppercase tracking-wider self-end mb-2">
-            Geography
-          </div>
-
-          <FilterSelect label="Region" value={region} onChange={v => { setRegion(v); setCountry(''); setCity('') }} placeholder="All Regions">
-            {(options.regions || []).map(r => <option key={r} value={r}>{r}</option>)}
-          </FilterSelect>
-
-          <FilterSelect label="Country" value={country} onChange={v => { setCountry(v); setCity('') }} placeholder="All Countries">
-            {filteredCountries.map(c => <option key={c} value={c}>{c}</option>)}
-          </FilterSelect>
-
-          <FilterSelect label="City" value={city} onChange={setCity} placeholder="All Cities">
-            {(options.cities || []).map(c => <option key={c} value={c}>{c}</option>)}
-          </FilterSelect>
-        </div>
-
         {/* No Contacts toggle */}
-        <div className="mt-3 pt-3 border-t border-qgray-100 flex items-center gap-2">
+        <div className="flex items-center gap-2 pt-1">
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input
               type="checkbox"

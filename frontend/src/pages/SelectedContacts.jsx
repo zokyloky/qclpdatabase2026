@@ -21,6 +21,13 @@ function EmailIcon({ className = 'w-4 h-4' }) {
   )
 }
 
+// Ensure URLs have a proper protocol prefix
+function normalizeUrl(url) {
+  if (!url) return null
+  if (/^https?:\/\//i.test(url)) return url
+  return 'https://' + url
+}
+
 function LinkedInIcon({ className = 'w-4 h-4' }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -230,7 +237,7 @@ export default function SelectedContacts() {
                         </td>
                         <td className="px-4 py-2.5 text-center">
                           {c.linkedin_url
-                            ? <a href={c.linkedin_url} target="_blank" rel="noopener noreferrer"
+                            ? <a href={normalizeUrl(c.linkedin_url)} target="_blank" rel="noopener noreferrer"
                                  className="inline-flex items-center justify-center text-qgray-400 hover:text-[#0077B5] transition-colors">
                                 <LinkedInIcon />
                               </a>

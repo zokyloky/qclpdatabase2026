@@ -368,7 +368,8 @@ def pending_review(
             """
             SELECT c.id, c.first_name, c.last_name, c.job_title, c.role_tags,
                    c.email, c.linkedin_url, c.qa_flags, c.lp_firm_id, c.updated_at,
-                   f.lp_name, f.display_name, f.institution_type, f.country
+                   f.lp_name, f.display_name, f.institution_type,
+                   f.city, f.country, f.region
             FROM lp_contacts c
             JOIN lp_firms f ON f.id = c.lp_firm_id
             WHERE c.filter_status = 'pending_review' AND c.is_active = 1
@@ -474,29 +475,30 @@ def delete_outreach(entry_id: str, db=Depends(get_db)):
 # ── Export ────────────────────────────────────────────────────────────────────
 @app.get("/api/export/contacts", dependencies=[Depends(verify_token)])
 def export_selected_contacts(db=Depends(get_db)):
-    """Download all is_selected=1 contacts as CSV."""
+    """Download all is_selected=1 contacts as CSV in Dynamo-compatible format."""
     with dict_cursor(db) as cur:
         cur.execute(
             """
             SELECT
-                f.display_name  AS firm_name,
-                f.institution_type,
-                f.country,
-                f.region,
-                f.investor_status,
-                f.source        AS firm_source,
-                c.first_name,
-                c.last_name,
-                c.job_title,
-                c.email,
-                c.linkedin_url,
-                c.filter_score,
-                c.role_tags,
-                c.source        AS contact_source
+                f.display_name          AS "Company Name",
+                f.country               AS "Company Primary Country",
+                f.city                  AS "Company Primary City",
+                f.institution_type      AS "Company Investor Category",
+                (COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')) AS "Full name",
+                c.first_name            AS "First Name",
+                c.email                 AS "Email",
+                NULL                    AS "Business Phone",
+                NULL                    AS "Mobile phone",
+                f.last_activity_date    AS "Company Last activity date",
+                NULL                    AS "Comments",
+                f.dynamo_internal_id    AS "Internal ID",
+                f.preqin_firm_id        AS "Preqin Firm ID",
+                c.linkedin_url          AS "LinkedIn URL",
+                c.job_title             AS "Job Title"
             FROM lp_contacts c
             JOIN lp_firms f ON f.id = c.lp_firm_id
             WHERE c.is_selected = 1 AND c.is_active = 1 AND f.is_active = 1
-            ORDER BY f.display_name, COALESCE(c.filter_score, 0) DESC
+            ORDER BY f.display_name, c.last_name, c.first_name
             """
         )
         rows = cur.fetchall()
@@ -504,8 +506,27 @@ def export_selected_contacts(db=Depends(get_db)):
     if not rows:
         raise HTTPException(404, "No selected contacts found")
 
+    # Column order matching Dynamo export format exactly, with our additions appended
+    fieldnames = [
+        "Company Name",
+        "Company Primary Country",
+        "Company Primary City",
+        "Company Investor Category",
+        "Full name",
+        "First Name",
+        "Email",
+        "Business Phone",
+        "Mobile phone",
+        "Company Last activity date",
+        "Comments",
+        "Internal ID",
+        "Preqin Firm ID",
+        "LinkedIn URL",
+        "Job Title",
+    ]
+
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
     writer.writeheader()
     for r in rows:
         writer.writerow(dict(r))
@@ -1038,12 +1059,23 @@ def get_options(db=Depends(get_db)):
         for row in cur.fetchall():
             country_by_region.setdefault(row["region"], []).append(row["country"])
 
+        # Build a country → [cities] mapping for cascading city filter
+        cur.execute("""
+            SELECT DISTINCT country, city FROM lp_firms
+            WHERE country IS NOT NULL AND city IS NOT NULL AND city != ''
+            ORDER BY country, city
+        """)
+        city_by_country: dict = {}
+        for row in cur.fetchall():
+            city_by_country.setdefault(row["country"], []).append(row["city"])
+
     return {
         "institution_types": inst_types,
         "regions":           regions,
         "countries":         countries,
         "cities":            cities,
         "countryByRegion":   country_by_region,
+        "cityByCountry":     city_by_country,
         "sources":           ["both", "dynamo_only", "preqin_only"],
         "investor_statuses": ["Active LP", "Prospect"],
         "workflow_statuses": list(VALID_WORKFLOW_STATUSES) + ["no_contacts"],
