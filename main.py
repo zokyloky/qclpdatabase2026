@@ -118,6 +118,8 @@ def list_firms(
     source:           Optional[str]  = Query(None),
     institution_type: Optional[str]  = Query(None),
     region:           Optional[str]  = Query(None),
+    country:          Optional[str]  = Query(None),
+    city:             Optional[str]  = Query(None),
     investor_status:  Optional[str]  = Query(None),
     workflow_status:  Optional[str]  = Query(None),
     page:             int            = Query(1, ge=1),
@@ -145,6 +147,14 @@ def list_firms(
     if region:
         where_clauses.append("f.region = %s")
         params.append(region)
+
+    if country:
+        where_clauses.append("f.country = %s")
+        params.append(country)
+
+    if city:
+        where_clauses.append("f.city ILIKE %s")
+        params.append(city)
 
     if investor_status:
         where_clauses.append("f.investor_status = %s")
@@ -1007,11 +1017,26 @@ def get_options(db=Depends(get_db)):
         cur.execute("SELECT DISTINCT country FROM lp_firms WHERE country IS NOT NULL ORDER BY country")
         countries = [r["country"] for r in cur.fetchall()]
 
+        cur.execute("SELECT DISTINCT city FROM lp_firms WHERE city IS NOT NULL AND city != '' ORDER BY city")
+        cities = [r["city"] for r in cur.fetchall()]
+
+        # Build a region → [countries] mapping for cascading geography filter
+        cur.execute("""
+            SELECT DISTINCT region, country FROM lp_firms
+            WHERE region IS NOT NULL AND country IS NOT NULL
+            ORDER BY region, country
+        """)
+        country_by_region: dict = {}
+        for row in cur.fetchall():
+            country_by_region.setdefault(row["region"], []).append(row["country"])
+
     return {
         "institution_types": inst_types,
-        "regions":   regions,
-        "countries": countries,
-        "sources":   ["both", "dynamo_only", "preqin_only"],
+        "regions":           regions,
+        "countries":         countries,
+        "cities":            cities,
+        "countryByRegion":   country_by_region,
+        "sources":           ["both", "dynamo_only", "preqin_only"],
         "investor_statuses": ["Active LP", "Prospect"],
         "workflow_statuses": list(VALID_WORKFLOW_STATUSES) + ["no_contacts"],
     }

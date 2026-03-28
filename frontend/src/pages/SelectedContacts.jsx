@@ -63,7 +63,10 @@ export default function SelectedContacts() {
   const grouped = useMemo(() => {
     const map = new Map()
     for (const c of filtered) {
-      if (!map.has(c.lp_firm_id)) map.set(c.lp_firm_id, { firm_name: c.firm_name, institution_type: c.institution_type, country: c.country, lp_firm_id: c.lp_firm_id, contacts: [] })
+      if (!map.has(c.lp_firm_id)) map.set(c.lp_firm_id, {
+        firm_name: c.firm_name, institution_type: c.institution_type,
+        country: c.country, lp_firm_id: c.lp_firm_id, contacts: []
+      })
       map.get(c.lp_firm_id).contacts.push(c)
     }
     return Array.from(map.values())
@@ -80,37 +83,39 @@ export default function SelectedContacts() {
     return (
       <button
         onClick={() => toggleSort(field)}
-        className={`flex items-center gap-1 font-medium text-xs uppercase tracking-wide
-          ${active ? 'text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+        className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider transition-colors
+          ${active ? 'text-qnavy-800' : 'text-qgray-500 hover:text-qgray-700'}`}
       >
         {label}
-        <span className="text-gray-400">{active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+        <span className="text-qgray-400">{active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
       </button>
     )
   }
 
+  const firmCount = new Set(contacts.map(c => c.lp_firm_id)).size
+
   return (
-    <div className="space-y-4 max-w-6xl">
+    <div className="space-y-4 w-full">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Selected Contacts</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {loading ? 'Loading…' : `${contacts.length} contacts shortlisted across ${new Set(contacts.map(c => c.lp_firm_id)).size} firms`}
+          <h1 className="text-2xl font-semibold text-qgray-900">Selected Contacts</h1>
+          <p className="text-sm text-qgray-500 mt-0.5">
+            {loading ? 'Loading…' : `${contacts.length} contact${contacts.length !== 1 ? 's' : ''} shortlisted across ${firmCount} firm${firmCount !== 1 ? 's' : ''}`}
           </p>
         </div>
         <button
           onClick={handleExport}
           disabled={exporting || contacts.length === 0}
-          className="btn-secondary text-sm py-2 px-4 whitespace-nowrap disabled:opacity-40"
+          className="btn-secondary disabled:opacity-40"
         >
           {exporting ? 'Exporting…' : '↓ Export CSV'}
         </button>
       </div>
 
       {/* Search */}
-      <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
+      <div className="filter-bar">
         <input
           type="search"
           placeholder="Search by firm, name, title, or email…"
@@ -121,39 +126,34 @@ export default function SelectedContacts() {
       </div>
 
       {loading ? (
-        <div className="text-center py-20 text-gray-400">Loading…</div>
+        <div className="text-center py-20 text-qgray-400">Loading…</div>
       ) : contacts.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-16 text-center">
+        <div className="card p-16 text-center">
           <div className="text-4xl mb-3">📋</div>
-          <p className="font-medium text-gray-900">No contacts shortlisted yet.</p>
-          <p className="text-sm text-gray-500 mt-1">Go to a firm and shortlist contacts to see them here.</p>
-          <button
-            onClick={() => navigate('/firms')}
-            className="mt-4 btn-primary text-sm"
-          >
+          <p className="font-medium text-qgray-900">No contacts shortlisted yet.</p>
+          <p className="text-sm text-qgray-500 mt-1">Go to a firm and shortlist contacts to see them here.</p>
+          <button onClick={() => navigate('/firms')} className="mt-4 btn-primary text-sm">
             Browse firms →
           </button>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-10 text-center">
-          <p className="text-sm text-gray-400">No contacts match your search.</p>
+        <div className="card p-10 text-center">
+          <p className="text-sm text-qgray-400">No contacts match your search.</p>
         </div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div className="card overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-4 py-3 text-left">
-                  <SortHeader label="Firm" field="firm" />
+              <tr className="bg-qgray-50 border-b border-qgray-200">
+                <th className="px-4 py-3 text-left"><SortHeader label="Firm" field="firm" /></th>
+                <th className="px-4 py-3 text-left"><SortHeader label="Name" field="name" /></th>
+                <th className="px-4 py-3 text-left"><SortHeader label="Title" field="title" /></th>
+                <th className="px-4 py-3 text-center w-12">
+                  <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Email</span>
                 </th>
-                <th className="px-4 py-3 text-left">
-                  <SortHeader label="Name" field="name" />
+                <th className="px-4 py-3 text-center w-12">
+                  <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">LinkedIn</span>
                 </th>
-                <th className="px-4 py-3 text-left">
-                  <SortHeader label="Title" field="title" />
-                </th>
-                <th className="px-4 py-3 text-center w-10">Email</th>
-                <th className="px-4 py-3 text-center w-10">LinkedIn</th>
                 <th className="px-4 py-3 text-center">
                   <SortHeader label="Score" field="score" />
                 </th>
@@ -164,22 +164,22 @@ export default function SelectedContacts() {
               {grouped.map(group => (
                 <>
                   {/* Firm group header */}
-                  <tr key={`group-${group.lp_firm_id}`} className="bg-gray-50 border-b border-gray-100">
+                  <tr key={`group-${group.lp_firm_id}`} className="bg-qnavy-50 border-b border-qnavy-100">
                     <td colSpan={7} className="px-4 py-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <button
                           onClick={() => navigate(`/firms/${group.lp_firm_id}`)}
-                          className="font-semibold text-sm text-blue-700 hover:text-blue-900 hover:underline"
+                          className="font-semibold text-sm text-qnavy-800 hover:text-qnavy-600 hover:underline"
                         >
                           {group.firm_name}
                         </button>
                         {group.institution_type && (
-                          <span className="text-xs text-gray-400">· {group.institution_type}</span>
+                          <span className="text-xs text-qgray-400">· {group.institution_type}</span>
                         )}
                         {group.country && (
-                          <span className="text-xs text-gray-400">· {group.country}</span>
+                          <span className="text-xs text-qgray-400">· {group.country}</span>
                         )}
-                        <span className="ml-auto text-xs text-blue-600 font-medium">
+                        <span className="ml-auto text-xs text-qnavy-700 font-semibold">
                           {group.contacts.length} shortlisted
                         </span>
                       </div>
@@ -188,44 +188,49 @@ export default function SelectedContacts() {
                   {/* Contact rows */}
                   {group.contacts.map(c => {
                     const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ')
+                    const isDynamo = c.source === 'dynamo'
                     return (
-                      <tr key={c.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors">
-                        <td className="px-4 py-2.5 text-gray-300">—</td>
+                      <tr key={c.id} className="border-b border-qgray-50 hover:bg-qgray-50 transition-colors">
                         <td className="px-4 py-2.5">
-                          <span className="font-medium text-gray-900">{fullName || <span className="text-gray-400">—</span>}</span>
+                          {isDynamo && (
+                            <span className="inline-flex px-1.5 py-0.5 rounded text-2xs font-medium bg-purple-50 text-purple-700 border border-purple-100">D</span>
+                          )}
                         </td>
-                        <td className="px-4 py-2.5 text-gray-500 text-xs">
-                          {c.job_title || <span className="text-gray-300">—</span>}
+                        <td className="px-4 py-2.5">
+                          <span className="font-medium text-qgray-900">{fullName || <span className="text-qgray-400">—</span>}</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-qgray-500 text-xs">
+                          {c.job_title || <span className="text-qgray-300">—</span>}
                         </td>
                         <td className="px-4 py-2.5 text-center">
                           {c.email
                             ? <a href={`mailto:${c.email}`} title={c.email}
-                                 className="inline-flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
-                                <img src="/email.webp" alt="Email" className="w-5 h-5 object-contain" />
+                                 className="inline-flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity">
+                                <img src="/email.svg" alt="Email" className="w-5 h-5 object-contain" style={{ filter: 'invert(24%) sepia(49%) saturate(573%) hue-rotate(186deg) brightness(90%) contrast(95%)' }} />
                               </a>
-                            : <span className="text-gray-200">—</span>}
+                            : <span className="text-qgray-200">—</span>}
                         </td>
                         <td className="px-4 py-2.5 text-center">
                           {c.linkedin_url
                             ? <a href={c.linkedin_url} target="_blank" rel="noopener noreferrer"
                                  className="inline-flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
-                                <img src="/linkedin.webp" alt="LinkedIn" className="w-5 h-5 object-contain" />
+                                <img src="/linkedin.svg" alt="LinkedIn" className="w-5 h-5 object-contain" />
                               </a>
-                            : <span className="text-gray-200">—</span>}
+                            : <span className="text-qgray-200">—</span>}
                         </td>
                         <td className="px-4 py-2.5 text-center">
                           {c.filter_score != null ? (
                             <span className={`text-sm font-semibold
-                              ${c.filter_score >= 80 ? 'text-green-600'
-                                : c.filter_score >= 60 ? 'text-yellow-600' : 'text-gray-500'}`}>
+                              ${c.filter_score >= 80 ? 'text-qteal-700'
+                                : c.filter_score >= 60 ? 'text-amber-600' : 'text-qgray-500'}`}>
                               {c.filter_score}
                             </span>
-                          ) : <span className="text-gray-300">—</span>}
+                          ) : <span className="text-qgray-300">—</span>}
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <button
                             onClick={() => navigate(`/firms/${c.lp_firm_id}`)}
-                            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                            className="text-xs text-qnavy-600 hover:text-qnavy-800 font-medium"
                           >
                             View →
                           </button>
@@ -238,8 +243,8 @@ export default function SelectedContacts() {
             </tbody>
           </table>
 
-          <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-400">
-            {filtered.length} contacts across {grouped.length} firms
+          <div className="px-4 py-3 border-t border-qgray-100 bg-qgray-50 text-xs text-qgray-400">
+            {filtered.length} contact{filtered.length !== 1 ? 's' : ''} across {grouped.length} firm{grouped.length !== 1 ? 's' : ''}
             {debouncedSearch && ` · filtered from ${contacts.length} total`}
           </div>
         </div>

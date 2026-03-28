@@ -2,10 +2,10 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { logout } from '../api'
 
 const navItems = [
-  { to: '/firms',    label: 'LP Firms',          icon: '🏢' },
-  { to: '/review',   label: 'Review Queue',      icon: '📋' },
-  { to: '/selected', label: 'Selected Contacts', icon: '✅' },
-  { to: '/sync',     label: 'Sync',              icon: '🔄' },
+  { to: '/firms',    label: 'LP Firms'          },
+  { to: '/review',   label: 'Review Queue'      },
+  { to: '/selected', label: 'Selected Contacts' },
+  { to: '/sync',     label: 'Sync'              },
 ]
 
 export default function Layout() {
@@ -17,43 +17,54 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Top nav */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
-        <div className="max-w-screen-xl mx-auto px-6 h-14 flex items-center justify-between">
+    <div className="min-h-screen flex flex-col bg-qgray-100">
+
+      {/* ── Top navigation ── */}
+      <header className="bg-qnavy-800 sticky top-0 z-40">
+        <div className="w-full px-6 h-14 flex items-center justify-between">
+
+          {/* Brand + nav */}
           <div className="flex items-center gap-8">
-            <span className="font-semibold text-gray-900 text-sm tracking-wide">
-              LP Intelligence
-            </span>
-            <nav className="flex items-center gap-1">
-              {navItems.map(({ to, label, icon }) => (
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              <div className="w-7 h-7 rounded bg-qteal-600 flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-sm leading-none select-none">Q</span>
+              </div>
+              <div className="leading-tight">
+                <div className="text-white font-semibold text-sm tracking-wide">LP Intelligence</div>
+                <div className="text-qnavy-300 text-2xs tracking-widest font-medium">QUADRIA CAPITAL</div>
+              </div>
+            </div>
+
+            <nav className="flex items-center gap-0.5">
+              {navItems.map(({ to, label }) => (
                 <NavLink
                   key={to}
                   to={to}
                   className={({ isActive }) =>
-                    `flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ` +
+                    `px-3.5 py-1.5 rounded text-sm font-medium transition-all duration-150 ` +
                     (isActive
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900')
+                      ? 'bg-white/15 text-white'
+                      : 'text-qnavy-200 hover:bg-white/10 hover:text-white')
                   }
                 >
-                  <span>{icon}</span>
-                  <span>{label}</span>
+                  {label}
                 </NavLink>
               ))}
             </nav>
           </div>
+
+          {/* Sign out */}
           <button
             onClick={handleLogout}
-            className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            className="text-sm text-qnavy-200 hover:text-white transition-colors px-3 py-1.5 rounded hover:bg-white/10"
           >
             Sign out
           </button>
         </div>
       </header>
 
-      {/* Page content */}
-      <main className="flex-1 max-w-screen-xl mx-auto w-full px-6 py-6">
+      {/* ── Page content — full width ── */}
+      <main className="flex-1 w-full px-6 py-6">
         <Outlet />
       </main>
     </div>

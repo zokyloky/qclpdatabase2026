@@ -34,38 +34,34 @@ export default function ReviewQueue() {
     }
   }
 
-  async function handleBulkApprove(ids) {
-    for (const id of ids) await handleAction(id, 'approved')
-  }
-
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4 w-full">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Review Queue</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
+        <h1 className="text-2xl font-semibold text-qgray-900">Review Queue</h1>
+        <p className="text-sm text-qgray-500 mt-0.5">
           Contacts with no role tags in Preqin — classify each as Approved or Blacklisted.
           {data.total > 0 && ` ${data.total} remaining.`}
         </p>
       </div>
 
       {loading ? (
-        <div className="text-center py-20 text-gray-400">Loading…</div>
+        <div className="text-center py-20 text-qgray-400">Loading…</div>
       ) : data.contacts.length === 0 ? (
         <div className="card p-10 text-center">
           <div className="text-4xl mb-3">✅</div>
-          <p className="font-medium text-gray-900">Review queue is empty.</p>
-          <p className="text-sm text-gray-500 mt-1">All contacts have been classified.</p>
+          <p className="font-medium text-qgray-900">Review queue is empty.</p>
+          <p className="text-sm text-qgray-500 mt-1">All contacts have been classified.</p>
         </div>
       ) : (
         <div className="card overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Contact</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Job title</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Firm</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
-                <th className="px-4 py-3 font-medium text-gray-600 text-right">Action</th>
+              <tr className="bg-qgray-50 border-b border-qgray-200">
+                <th className="text-left px-4 py-3 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Contact</th>
+                <th className="text-left px-4 py-3 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Job Title</th>
+                <th className="text-left px-4 py-3 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Firm</th>
+                <th className="text-left px-4 py-3 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Email</th>
+                <th className="px-4 py-3 font-semibold text-2xs uppercase tracking-wider text-qgray-500 text-right">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -73,43 +69,43 @@ export default function ReviewQueue() {
                 const name = [c.first_name, c.last_name].filter(Boolean).join(' ')
                 const isSaving = saving[c.id]
                 return (
-                  <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <tr key={c.id} className="border-b border-qgray-100 hover:bg-qgray-50 transition-colors">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{name || <span className="text-gray-400">Unknown</span>}</div>
+                      <div className="font-medium text-qgray-900">{name || <span className="text-qgray-400">Unknown</span>}</div>
                       {c.qa_flags && (
-                        <div className="text-xs text-orange-500 mt-0.5">{c.qa_flags}</div>
+                        <div className="text-xs text-amber-600 mt-0.5">{c.qa_flags}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-gray-600 max-w-xs">
-                      {c.job_title || <span className="text-gray-300">No title</span>}
+                    <td className="px-4 py-3 text-qgray-600 max-w-xs">
+                      {c.job_title || <span className="text-qgray-300">No title</span>}
                     </td>
                     <td className="px-4 py-3">
                       <button
                         onClick={() => navigate(`/firms/${c.lp_firm_id}`)}
-                        className="text-blue-600 hover:underline text-left"
+                        className="text-qnavy-600 hover:text-qnavy-800 hover:underline text-left font-medium"
                       >
                         {c.display_name || c.lp_name}
                       </button>
-                      <div className="text-xs text-gray-400">{c.institution_type} · {c.country}</div>
+                      <div className="text-xs text-qgray-400 mt-0.5">{c.institution_type} · {c.country}</div>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 text-xs">
+                    <td className="px-4 py-3 text-qgray-600 text-xs">
                       {c.email ? (
-                        <a href={`mailto:${c.email}`} className="hover:text-blue-600">{c.email}</a>
-                      ) : <span className="text-gray-300">No email</span>}
+                        <a href={`mailto:${c.email}`} className="hover:text-qnavy-600">{c.email}</a>
+                      ) : <span className="text-qgray-300">No email</span>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={() => handleAction(c.id, 'approved')}
                           disabled={isSaving}
-                          className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded transition-colors disabled:opacity-50"
+                          className="text-xs px-3 py-1.5 bg-qteal-600 hover:bg-qteal-700 text-white rounded font-medium transition-colors disabled:opacity-50"
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => handleAction(c.id, 'blacklisted')}
                           disabled={isSaving}
-                          className="text-xs px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded transition-colors disabled:opacity-50"
+                          className="text-xs px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded transition-colors disabled:opacity-50"
                         >
                           Blacklist
                         </button>
@@ -123,7 +119,7 @@ export default function ReviewQueue() {
 
           {/* Pagination */}
           {data.pages > 1 && (
-            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between text-sm text-gray-600">
+            <div className="px-4 py-3 border-t border-qgray-100 bg-qgray-50 flex items-center justify-between text-sm text-qgray-600">
               <span>{data.total} contacts remaining</span>
               <div className="flex items-center gap-2">
                 <button
@@ -133,7 +129,7 @@ export default function ReviewQueue() {
                 >
                   ← Prev
                 </button>
-                <span>{page} / {data.pages}</span>
+                <span className="text-xs">{page} / {data.pages}</span>
                 <button
                   disabled={page === data.pages}
                   onClick={() => setPage(p => p + 1)}

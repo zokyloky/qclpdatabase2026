@@ -12,7 +12,7 @@ function useDebounce(value, delay = 400) {
   return debounced
 }
 
-// Tooltip component — hover to see explanation
+// Tooltip component
 function Tooltip({ text, children }) {
   const [visible, setVisible] = useState(false)
   return (
@@ -23,7 +23,7 @@ function Tooltip({ text, children }) {
     >
       {children}
       {visible && (
-        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-56 px-3 py-2 text-xs text-white bg-gray-800 rounded shadow-lg leading-snug pointer-events-none">
+        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 text-xs text-white bg-qnavy-800 rounded-lg shadow-lg leading-snug pointer-events-none whitespace-normal">
           {text}
         </span>
       )}
@@ -31,60 +31,59 @@ function Tooltip({ text, children }) {
   )
 }
 
-// Source pill shown next to firm name
+// Source pill
 function SourcePill({ source }) {
   const config = {
-    both:        { label: 'D+P', bg: 'bg-indigo-100', text: 'text-indigo-700',
-                   tip: 'Matched across both Dynamo and Preqin.' },
-    dynamo_only: { label: 'D',   bg: 'bg-purple-100', text: 'text-purple-700',
-                   tip: 'This firm exists in Dynamo only — no Preqin match found.' },
-    preqin_only: { label: 'P',   bg: 'bg-sky-100',    text: 'text-sky-700',
-                   tip: 'This firm is from Preqin only — not currently in Dynamo.' },
+    both:        { label: 'D+P', className: 'bg-qnavy-50 text-qnavy-700 border border-qnavy-200', tip: 'Matched across both Dynamo and Preqin.' },
+    dynamo_only: { label: 'D',   className: 'bg-purple-50 text-purple-700 border border-purple-200', tip: 'Dynamo only — no Preqin match found.' },
+    preqin_only: { label: 'P',   className: 'bg-sky-50 text-sky-700 border border-sky-200',    tip: 'Preqin only — not currently in Dynamo.' },
   }
   const c = config[source] || config.preqin_only
   return (
     <Tooltip text={c.tip}>
-      <span className={`ml-1.5 px-1.5 py-0.5 rounded text-xs font-semibold ${c.bg} ${c.text} cursor-default`}>
+      <span className={`ml-1.5 px-1.5 py-0.5 rounded text-2xs font-semibold cursor-default ${c.className}`}>
         {c.label}
       </span>
     </Tooltip>
   )
 }
 
-// Contacts cell — the primary information display per firm
+// Contacts cell
 function ContactsCell({ firm, maxContacts }) {
-  const { available_count, selected_count, pending_count, workflow_status } = firm
-  const remaining = Math.max(0, maxContacts - selected_count)
+  const { available_count, selected_count, pending_count, dynamo_count, workflow_status } = firm
+  // Dynamo contacts are auto-accepted; cap only applies to non-Dynamo
+  const nonDynamoSelected = Math.max(0, selected_count - (dynamo_count || 0))
+  const remaining = Math.max(0, maxContacts - nonDynamoSelected)
   const hasNoContacts = available_count === 0 && pending_count === 0
 
   if (hasNoContacts) {
     return (
-      <Tooltip text="No approvable contacts found for this firm in either Dynamo or Preqin.">
-        <span className="text-xs text-gray-400 cursor-default">No contacts</span>
+      <Tooltip text="No approvable contacts found for this firm.">
+        <span className="text-xs text-qgray-400 cursor-default">No contacts</span>
       </Tooltip>
     )
   }
 
   if (workflow_status === 'complete') {
     return (
-      <span className="text-xs text-gray-500">
-        <span className="font-medium text-gray-700">{selected_count}</span> shortlisted
+      <span className="text-xs text-qgray-500">
+        <span className="font-medium text-qgray-700">{selected_count}</span> shortlisted
         {pending_count > 0 && (
-          <span className="ml-2 text-amber-600">· {pending_count} under review</span>
+          <span className="ml-2 text-amber-600">· {pending_count} pending</span>
         )}
       </span>
     )
   }
 
   return (
-    <Tooltip text={`${selected_count} shortlisted · ${available_count} available · ${remaining} slot${remaining !== 1 ? 's' : ''} remaining (cap: ${maxContacts})`}>
+    <Tooltip text={`${nonDynamoSelected} shortlisted (excl. ${dynamo_count || 0} Dynamo auto-accepted) · ${remaining} slot${remaining !== 1 ? 's' : ''} remaining (cap: ${maxContacts})`}>
       <span className="text-xs cursor-default">
-        <span className={`font-semibold ${selected_count > 0 ? 'text-blue-700' : 'text-gray-400'}`}>
-          {selected_count} / {maxContacts}
+        <span className={`font-semibold ${nonDynamoSelected > 0 ? 'text-qnavy-700' : 'text-qgray-400'}`}>
+          {nonDynamoSelected} / {maxContacts}
         </span>
-        <span className="text-gray-400 ml-1">shortlisted</span>
-        {available_count > 0 && (
-          <span className="text-gray-400 ml-1">· {available_count} available</span>
+        <span className="text-qgray-400 ml-1">shortlisted</span>
+        {(dynamo_count || 0) > 0 && (
+          <span className="text-purple-500 ml-1">· {dynamo_count} Dynamo</span>
         )}
         {pending_count > 0 && (
           <span className="ml-1 text-amber-600">· {pending_count} to review</span>
@@ -94,39 +93,61 @@ function ContactsCell({ firm, maxContacts }) {
   )
 }
 
-// Column header with optional sort toggle
+// Sortable column header
 function SortableHeader({ label, col, current, dir, onSort, tooltip }) {
   const active = current === col
   const header = (
     <button
       onClick={() => onSort(col)}
-      className={`flex items-center gap-1 font-medium text-xs uppercase tracking-wide
-        ${active ? 'text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+      className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider transition-colors
+        ${active ? 'text-qnavy-800' : 'text-qgray-500 hover:text-qgray-700'}`}
     >
       {label}
-      <span className="text-gray-400">{active ? (dir === 'asc' ? '↑' : '↓') : '↕'}</span>
+      <span className="text-qgray-400 text-xs">{active ? (dir === 'asc' ? '↑' : '↓') : '↕'}</span>
     </button>
   )
   return tooltip ? <Tooltip text={tooltip}>{header}</Tooltip> : header
 }
 
-// Summary stats bar across the top
-function StatsBar({ stats, maxContacts }) {
+// Stats bar
+function StatsBar({ stats }) {
   if (!stats) return null
+  const items = [
+    { label: 'Needs Attention', value: stats.firms_needs_attention, color: 'text-amber-700', dot: 'bg-amber-400' },
+    { label: 'Unreviewed',      value: stats.firms_unreviewed,      color: 'text-qgray-700',  dot: 'bg-qgray-400' },
+    { label: 'In Progress',     value: stats.firms_in_progress,     color: 'text-qnavy-700',  dot: 'bg-qnavy-500' },
+    { label: 'Complete',        value: stats.firms_complete,        color: 'text-qteal-700',  dot: 'bg-qteal-500' },
+    { label: 'Shortlisted',     value: `${stats.selected ?? 0}`,   color: 'text-qnavy-800',  dot: 'bg-qnavy-800' },
+  ]
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
-      {[
-        { label: 'Needs Attention', value: stats.firms_needs_attention, color: 'text-amber-700' },
-        { label: 'Unreviewed',      value: stats.firms_unreviewed,      color: 'text-gray-700'  },
-        { label: 'In Progress',     value: stats.firms_in_progress,     color: 'text-blue-700'  },
-        { label: 'Complete',        value: stats.firms_complete,        color: 'text-green-700' },
-        { label: 'Shortlisted',     value: `${stats.selected ?? 0} contacts`, color: 'text-gray-900' },
-      ].map(({ label, value, color }) => (
-        <div key={label} className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-          <div className={`text-xl font-semibold ${color}`}>{value ?? '—'}</div>
-          <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
+      {items.map(({ label, value, color, dot }) => (
+        <div key={label} className="stat-card">
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className={`w-2 h-2 rounded-full ${dot} flex-shrink-0`}></span>
+            <span className="text-2xs font-semibold text-qgray-500 uppercase tracking-wider">{label}</span>
+          </div>
+          <div className={`text-2xl font-semibold ${color}`}>{value ?? '—'}</div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// Styled select filter with label
+function FilterSelect({ label, value, onChange, children, placeholder }) {
+  const isActive = value !== ''
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <label className="text-2xs font-semibold text-qgray-500 uppercase tracking-wider px-0.5">{label}</label>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className={`select text-sm ${isActive ? 'active' : ''}`}
+      >
+        <option value="">{placeholder || `All ${label}`}</option>
+        {children}
+      </select>
     </div>
   )
 }
@@ -139,7 +160,7 @@ export default function FirmList() {
   const [page, setPage]               = useState(1)
   const [loading, setLoading]         = useState(true)
   const [exporting, setExporting]     = useState(false)
-  const [options, setOptions]         = useState({ institution_types: [], regions: [] })
+  const [options, setOptions]         = useState({ institution_types: [], regions: [], countries: [], cities: [] })
   const [stats, setStats]             = useState(null)
   const [maxContacts, setMaxContacts] = useState(5)
 
@@ -147,6 +168,8 @@ export default function FirmList() {
   const [sourceFilter, setSourceFilter] = useState('')
   const [instType, setInstType]         = useState('')
   const [region, setRegion]             = useState('')
+  const [country, setCountry]           = useState('')
+  const [city, setCity]                 = useState('')
   const [wfStatus, setWfStatus]         = useState('')
   const [sortBy, setSortBy]             = useState('workflow_priority')
   const [sortDir, setSortDir]           = useState('asc')
@@ -170,6 +193,8 @@ export default function FirmList() {
         source:           sourceFilter,
         institution_type: instType,
         region,
+        country,
+        city,
         workflow_status:  wfStatus,
         page,
         per_page:         PER_PAGE,
@@ -183,11 +208,11 @@ export default function FirmList() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, sourceFilter, instType, region, wfStatus, page, sortBy, sortDir])
+  }, [debouncedSearch, sourceFilter, instType, region, country, city, wfStatus, page, sortBy, sortDir])
 
   useEffect(() => {
     setPage(1)
-  }, [debouncedSearch, sourceFilter, instType, region, wfStatus, sortBy, sortDir])
+  }, [debouncedSearch, sourceFilter, instType, region, country, city, wfStatus, sortBy, sortDir])
 
   useEffect(() => { loadFirms() }, [loadFirms])
 
@@ -202,6 +227,13 @@ export default function FirmList() {
     finally { setExporting(false) }
   }
 
+  function clearFilters() {
+    setSearch(''); setSourceFilter(''); setInstType('')
+    setRegion(''); setCountry(''); setCity(''); setWfStatus('')
+  }
+
+  const activeFilterCount = [sourceFilter, instType, region, country, city, wfStatus].filter(Boolean).length
+
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
 
   function displayStatus(firm) {
@@ -209,74 +241,111 @@ export default function FirmList() {
     return firm.workflow_status
   }
 
+  // Filter countries/cities based on selected region (if region is set)
+  const filteredCountries = region && options.countryByRegion
+    ? (options.countryByRegion[region] || options.countries)
+    : options.countries || []
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 h-full">
 
       {/* Stats bar */}
-      <StatsBar stats={stats} maxContacts={maxContacts} />
+      <StatsBar stats={stats} />
 
       {/* Filter bar */}
-      <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex flex-wrap gap-3 items-center">
-        <input
-          type="search"
-          placeholder="Search firms…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="input text-sm flex-1 min-w-40"
-        />
+      <div className="filter-bar">
+        {/* Search row */}
+        <div className="flex flex-wrap gap-3 items-end">
+          <div className="flex flex-col gap-0.5 flex-1 min-w-48">
+            <label className="text-2xs font-semibold text-qgray-500 uppercase tracking-wider px-0.5">Search</label>
+            <input
+              type="search"
+              placeholder="Search firms…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="input text-sm"
+            />
+          </div>
 
-        <select value={wfStatus} onChange={e => setWfStatus(e.target.value)} className="select text-sm">
-          <option value="">All statuses</option>
-          <option value="needs_attention">Needs Attention</option>
-          <option value="unreviewed">Unreviewed</option>
-          <option value="in_progress">In Progress</option>
-          <option value="complete">Complete</option>
-          <option value="no_contacts">No Contacts</option>
-        </select>
+          {/* Status */}
+          <FilterSelect label="Status" value={wfStatus} onChange={setWfStatus} placeholder="All Statuses">
+            <option value="needs_attention">Needs Attention</option>
+            <option value="unreviewed">Unreviewed</option>
+            <option value="in_progress">In Progress</option>
+            <option value="complete">Complete</option>
+            <option value="no_contacts">No Contacts</option>
+          </FilterSelect>
 
-        <select value={instType} onChange={e => setInstType(e.target.value)} className="select text-sm">
-          <option value="">All types</option>
-          {options.institution_types.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
+          {/* Institution type */}
+          <FilterSelect label="Type" value={instType} onChange={setInstType} placeholder="All Types">
+            {options.institution_types.map(t => <option key={t} value={t}>{t}</option>)}
+          </FilterSelect>
 
-        <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)} className="select text-sm">
-          <option value="">All sources</option>
-          <option value="both">Dynamo + Preqin</option>
-          <option value="dynamo_only">Dynamo only</option>
-          <option value="preqin_only">Preqin only</option>
-        </select>
+          {/* Source */}
+          <FilterSelect label="Source" value={sourceFilter} onChange={setSourceFilter} placeholder="All Sources">
+            <option value="both">Dynamo + Preqin</option>
+            <option value="dynamo_only">Dynamo only</option>
+            <option value="preqin_only">Preqin only</option>
+          </FilterSelect>
 
-        <select value={region} onChange={e => setRegion(e.target.value)} className="select text-sm">
-          <option value="">All regions</option>
-          {options.regions.map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
+          <div className="flex items-end gap-2 ml-auto flex-shrink-0">
+            {activeFilterCount > 0 && (
+              <button onClick={clearFilters} className="text-sm text-qnavy-600 hover:text-qnavy-800 font-medium py-2 whitespace-nowrap">
+                Clear filters ({activeFilterCount})
+              </button>
+            )}
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              className="btn-secondary whitespace-nowrap"
+            >
+              {exporting ? 'Exporting…' : '↓ Export CSV'}
+            </button>
+          </div>
+        </div>
 
-        <button
-          onClick={handleExport}
-          disabled={exporting}
-          className="btn-secondary text-sm py-1.5 whitespace-nowrap"
-        >
-          {exporting ? 'Exporting…' : '↓ Export CSV'}
-        </button>
+        {/* Geography row */}
+        <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-qgray-100">
+          <div className="flex items-center gap-1.5 text-2xs font-semibold text-qgray-500 uppercase tracking-wider self-end mb-2">
+            Geography
+          </div>
+
+          <FilterSelect label="Region" value={region} onChange={v => { setRegion(v); setCountry(''); setCity('') }} placeholder="All Regions">
+            {(options.regions || []).map(r => <option key={r} value={r}>{r}</option>)}
+          </FilterSelect>
+
+          <FilterSelect label="Country" value={country} onChange={v => { setCountry(v); setCity('') }} placeholder="All Countries">
+            {filteredCountries.map(c => <option key={c} value={c}>{c}</option>)}
+          </FilterSelect>
+
+          <FilterSelect label="City" value={city} onChange={setCity} placeholder="All Cities">
+            {(options.cities || []).map(c => <option key={c} value={c}>{c}</option>)}
+          </FilterSelect>
+        </div>
       </div>
 
       {/* Firm table */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-sm text-gray-500">
-            {loading ? 'Loading…' : `${total.toLocaleString()} firms`}
+      <div className="card overflow-hidden">
+        {/* Table toolbar */}
+        <div className="px-4 py-2.5 border-b border-qgray-100 flex items-center justify-between bg-qgray-50">
+          <span className="text-sm text-qgray-500">
+            {loading ? 'Loading…' : `${total.toLocaleString()} firm${total !== 1 ? 's' : ''}`}
           </span>
-          <div className="flex items-center gap-3 text-sm text-gray-500">
-            <Tooltip text="Global cap per firm. Advisory — not enforced.">
-              <span className="cursor-default">Cap: {maxContacts} contacts / firm</span>
+          <div className="flex items-center gap-4 text-sm text-qgray-500">
+            <Tooltip text="Global cap per firm for non-Dynamo contacts. Advisory — not enforced.">
+              <span className="cursor-default text-xs font-medium">Cap: {maxContacts} / firm</span>
             </Tooltip>
             {totalPages > 1 && (
               <div className="flex items-center gap-1">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                  className="px-2 py-0.5 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">←</button>
-                <span>{page} / {totalPages}</span>
+                  className="px-2 py-0.5 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">
+                  ←
+                </button>
+                <span className="text-xs">{page} / {totalPages}</span>
                 <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                  className="px-2 py-0.5 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">→</button>
+                  className="px-2 py-0.5 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">
+                  →
+                </button>
               </div>
             )}
           </div>
@@ -285,35 +354,39 @@ export default function FirmList() {
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="px-4 py-2.5 text-left w-80">
+              <tr className="border-b border-qgray-200 bg-qgray-50">
+                <th className="px-4 py-3 text-left w-72">
                   <SortableHeader label="Firm" col="lp_name" current={sortBy} dir={sortDir} onSort={toggleSort} />
                 </th>
-                <th className="px-4 py-2.5 text-left">
+                <th className="px-4 py-3 text-left">
                   <SortableHeader label="Type" col="institution_type" current={sortBy} dir={sortDir} onSort={toggleSort} />
                 </th>
-                <th className="px-4 py-2.5 text-left">
+                <th className="px-4 py-3 text-left">
                   <SortableHeader label="Location" col="country" current={sortBy} dir={sortDir} onSort={toggleSort} />
                 </th>
-                <th className="px-4 py-2.5 text-left">
+                <th className="px-4 py-3 text-left">
                   <SortableHeader label="Contacts" col="selected_count" current={sortBy} dir={sortDir} onSort={toggleSort}
                     tooltip="Sort by number of shortlisted contacts." />
                 </th>
-                <th className="px-4 py-2.5 text-left">
-                  <SortableHeader label="Status" col="workflow_status" current={sortBy} dir={sortDir} onSort={toggleSort}
-                    tooltip="Sort by workflow status." />
+                <th className="px-4 py-3 text-left">
+                  <SortableHeader label="Status" col="workflow_status" current={sortBy} dir={sortDir} onSort={toggleSort} />
                 </th>
-                <th className="px-4 py-2.5 w-24"></th>
+                <th className="px-4 py-3 w-24"></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-16 text-gray-400 text-sm">Loading…</td>
+                  <td colSpan={6} className="text-center py-16 text-qgray-400 text-sm">Loading…</td>
                 </tr>
               ) : firms.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-16 text-gray-400 text-sm">No firms match your filters.</td>
+                  <td colSpan={6} className="text-center py-16 text-qgray-400 text-sm">
+                    No firms match your filters.{' '}
+                    {activeFilterCount > 0 && (
+                      <button onClick={clearFilters} className="text-qnavy-600 hover:underline">Clear filters</button>
+                    )}
+                  </td>
                 </tr>
               ) : firms.map(firm => {
                 const status = displayStatus(firm)
@@ -322,28 +395,38 @@ export default function FirmList() {
                   <tr
                     key={firm.id}
                     onClick={() => !noContacts && navigate(`/firms/${firm.id}`)}
-                    className={`border-b border-gray-50 transition-colors
+                    className={`border-b border-qgray-50 transition-colors
                       ${noContacts
-                        ? 'opacity-50 cursor-default'
-                        : 'hover:bg-blue-50 cursor-pointer'}`}
+                        ? 'opacity-40 cursor-default'
+                        : 'hover:bg-qnavy-50 cursor-pointer'}`}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        <span className="font-medium text-sm text-gray-900 truncate max-w-xs">
+                        <span className="font-medium text-sm text-qgray-900 truncate max-w-xs">
                           {firm.display_name || firm.lp_name}
                         </span>
                         <SourcePill source={firm.source} />
                       </div>
                     </td>
 
-                    <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
-                      {firm.institution_type || <span className="text-gray-300">—</span>}
+                    <td className="px-4 py-3 text-sm text-qgray-600 whitespace-nowrap">
+                      {firm.institution_type || <span className="text-qgray-300">—</span>}
                     </td>
 
-                    <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
-                      {firm.country || firm.region
-                        ? [firm.country, firm.region].filter(Boolean).join(' · ')
-                        : <span className="text-gray-300">—</span>}
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="text-sm text-qgray-700">
+                        {firm.city
+                          ? <span>{firm.city}</span>
+                          : firm.country
+                          ? <span>{firm.country}</span>
+                          : <span className="text-qgray-300">—</span>}
+                      </div>
+                      {firm.country && firm.city && (
+                        <div className="text-xs text-qgray-400 mt-0.5">{firm.country}{firm.region ? ` · ${firm.region}` : ''}</div>
+                      )}
+                      {!firm.city && firm.region && (
+                        <div className="text-xs text-qgray-400 mt-0.5">{firm.region}</div>
+                      )}
                     </td>
 
                     <td className="px-4 py-3">
@@ -360,14 +443,10 @@ export default function FirmList() {
                     </td>
 
                     <td className="px-4 py-3 text-right">
-                      {noContacts ? (
-                        <Tooltip text="No contacts available to review for this firm.">
-                          <span className="text-xs text-gray-300 cursor-default">No contacts</span>
-                        </Tooltip>
-                      ) : (
+                      {!noContacts && (
                         <button
                           onClick={e => { e.stopPropagation(); navigate(`/firms/${firm.id}`) }}
-                          className="text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
+                          className="text-sm text-qnavy-600 hover:text-qnavy-800 font-medium whitespace-nowrap"
                         >
                           Review →
                         </button>
@@ -380,18 +459,19 @@ export default function FirmList() {
           </table>
         </div>
 
+        {/* Pagination footer */}
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-gray-100 flex justify-between items-center text-sm text-gray-500">
-            <span>Page {page} of {totalPages}</span>
+          <div className="px-4 py-3 border-t border-qgray-100 flex justify-between items-center text-sm text-qgray-500 bg-qgray-50">
+            <span>Page {page} of {totalPages} &middot; {total.toLocaleString()} firms</span>
             <div className="flex gap-2">
               <button onClick={() => setPage(1)} disabled={page === 1}
-                className="px-3 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">First</button>
+                className="px-3 py-1 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">First</button>
               <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                className="px-3 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">Prev</button>
+                className="px-3 py-1 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">Prev</button>
               <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                className="px-3 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">Next</button>
+                className="px-3 py-1 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">Next</button>
               <button onClick={() => setPage(totalPages)} disabled={page === totalPages}
-                className="px-3 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">Last</button>
+                className="px-3 py-1 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">Last</button>
             </div>
           </div>
         )}
