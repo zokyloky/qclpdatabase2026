@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+node_modules/
+static/
+frontend/node_modules/
+frontend/dist/
+*.db
+*.sqlite
+.DS_Store
+supabase_import/
