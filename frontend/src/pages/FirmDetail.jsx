@@ -1,9 +1,27 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
-  getFirm, getFirmContacts, updateContact, updateFirmStatus, getSettings,
+  getFirm, getFirmContacts, getFirms, updateContact, updateFirmStatus, getSettings,
 } from '../api'
 import StatusBadge from '../components/StatusBadge'
+
+// ── Inline icon components (no external file dependency) ──────────────────────
+function EmailIcon({ className = 'w-5 h-5' }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M2 7l10 7 10-7" />
+    </svg>
+  )
+}
+
+function LinkedInIcon({ className = 'w-5 h-5' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+    </svg>
+  )
+}
 
 // ── Tooltip ────────────────────────────────────────────────────────────────────
 function Tooltip({ text, children }) {
@@ -24,26 +42,22 @@ function Tooltip({ text, children }) {
 
 // ── Single contact row in the Available tab ────────────────────────────────────
 function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxContacts }) {
-  const [saving, setSaving] = useState(false)
   const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ')
   const isSelected = contact.is_selected === 1
   const isDynamo = contact.source === 'dynamo'
 
-  // Dynamo contacts are auto-accepted — always shown as selected, cap doesn't apply
   // Cap only applies to non-Dynamo contacts
   const atCap = !isDynamo && nonDynamoSelectedCount >= maxContacts && !isSelected
 
-  async function handleSelect() {
+  function handleSelect() {
     if (isDynamo) return  // Dynamo contacts are auto-accepted, not manually toggled
-    setSaving(true)
-    try { await onToggle(contact.id, isSelected ? 0 : 1) }
-    finally { setSaving(false) }
+    onToggle(contact.id, isSelected ? 0 : 1)
   }
 
   return (
     <tr className={`border-b transition-colors
       ${isSelected || isDynamo
-        ? 'border-qnavy-100 bg-qnavy-50/40 hover:bg-qnavy-50'
+        ? 'border-qgreen-100 bg-qgreen-50/40 hover:bg-qgreen-50'
         : 'border-qgray-100 hover:bg-qgray-50'}`}>
 
       {/* Name / Title */}
@@ -68,8 +82,8 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
         {contact.email
           ? <Tooltip text={contact.email}>
               <a href={`mailto:${contact.email}`} onClick={e => e.stopPropagation()}
-                 className="inline-flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity">
-                <img src="/email.svg" alt="Email" className="w-5 h-5 object-contain" style={{ filter: 'invert(24%) sepia(49%) saturate(573%) hue-rotate(186deg) brightness(90%) contrast(95%)' }} />
+                 className="inline-flex items-center justify-center text-qgray-400 hover:text-qgreen-700 transition-colors">
+                <EmailIcon className="w-4.5 h-4.5" />
               </a>
             </Tooltip>
           : <span className="text-qgray-200">—</span>}
@@ -81,8 +95,8 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
           ? <Tooltip text="View LinkedIn profile">
               <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer"
                  onClick={e => e.stopPropagation()}
-                 className="inline-flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
-                <img src="/linkedin.svg" alt="LinkedIn" className="w-5 h-5 object-contain" />
+                 className="inline-flex items-center justify-center text-qgray-400 hover:text-[#0077B5] transition-colors">
+                <LinkedInIcon className="w-4.5 h-4.5" />
               </a>
             </Tooltip>
           : <span className="text-qgray-200">—</span>}
@@ -112,22 +126,21 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
         ) : isSelected ? (
           <button
             onClick={handleSelect}
-            disabled={saving}
-            className="text-xs px-3 py-1.5 rounded border border-qnavy-300 bg-qnavy-700 text-white font-medium hover:bg-qnavy-800 transition-colors disabled:opacity-50 whitespace-nowrap"
+            className="text-xs px-3 py-1.5 rounded border border-qgreen-600 bg-qgreen-700 text-white font-semibold hover:bg-qgreen-800 active:bg-qgreen-900 transition-colors whitespace-nowrap"
           >
-            {saving ? '…' : '✓ Shortlisted'}
+            ✓ Shortlisted
           </button>
         ) : (
           <Tooltip text={atCap ? `Cap of ${maxContacts} reached — remove another first.` : 'Add to shortlist'}>
             <button
               onClick={handleSelect}
-              disabled={saving || atCap}
+              disabled={atCap}
               className={`text-xs px-3 py-1.5 rounded border font-medium transition-colors disabled:opacity-40 whitespace-nowrap
                 ${atCap
                   ? 'border-qgray-200 text-qgray-300 cursor-not-allowed'
-                  : 'border-qgray-300 text-qgray-600 hover:border-qnavy-400 hover:text-qnavy-700 hover:bg-qnavy-50'}`}
+                  : 'border-qgray-300 text-qgray-600 hover:border-qgreen-500 hover:text-qgreen-700 hover:bg-qgreen-50'}`}
             >
-              {saving ? '…' : '+ Shortlist'}
+              + Shortlist
             </button>
           </Tooltip>
         )}
@@ -279,12 +292,17 @@ export default function FirmDetail() {
 
   const remainingSlots = Math.max(0, maxContacts - nonDynamoSelectedCount)
 
-  async function handleToggle(contactId, value) {
-    await updateContact(contactId, { is_selected: value })
+  // Optimistic update: flip the UI immediately, then sync with the server in the background.
+  // If the server call fails, we roll back to the previous value.
+  function handleToggle(contactId, value) {
     setContacts(cs => cs.map(c => c.id === contactId ? { ...c, is_selected: value } : c))
     if (value === 1 && firm?.workflow_status === 'unreviewed') {
       setFirm(f => ({ ...f, workflow_status: 'in_progress' }))
     }
+    updateContact(contactId, { is_selected: value }).catch(() => {
+      // Rollback on failure
+      setContacts(cs => cs.map(c => c.id === contactId ? { ...c, is_selected: 1 - value } : c))
+    })
   }
 
   async function handleStatusChange(contactId, status) {
@@ -297,6 +315,26 @@ export default function FirmDetail() {
     try {
       await updateFirmStatus(id, 'complete')
       setFirm(f => ({ ...f, workflow_status: 'complete', review_reason: null }))
+
+      // Auto-advance: find the next firm to review, in priority order
+      const statusPriority = ['needs_attention', 'in_progress', 'unreviewed']
+      let navigated = false
+      for (const status of statusPriority) {
+        if (navigated) break
+        try {
+          const { firms: candidates } = await getFirms({
+            workflow_status: status,
+            per_page: 10,
+            sort_by: 'workflow_priority',
+            sort_dir: 'asc',
+          })
+          const next = candidates.find(
+            f => String(f.id) !== String(id) && (f.available_count > 0 || f.pending_count > 0)
+          )
+          if (next) { navigate(`/firms/${next.id}`); navigated = true }
+        } catch { /* continue trying next priority */ }
+      }
+      if (!navigated) navigate('/firms')
     } catch (e) {
       alert('Error: ' + e.message)
     } finally {
@@ -327,7 +365,7 @@ export default function FirmDetail() {
 
       {/* Back */}
       <button onClick={() => navigate('/firms')}
-        className="text-sm text-qgray-500 hover:text-qnavy-700 flex items-center gap-1 font-medium transition-colors">
+        className="text-sm text-qgray-500 hover:text-qgreen-700 flex items-center gap-1 font-medium transition-colors">
         ← Back to firms
       </button>
 
@@ -348,7 +386,7 @@ export default function FirmDetail() {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-semibold text-qgray-900">
+              <h1 className="font-display font-bold text-3xl text-qgray-900 tracking-tight">
                 {firm.display_name || firm.lp_name}
               </h1>
               <StatusBadge status={firm.workflow_status} />
@@ -411,7 +449,7 @@ export default function FirmDetail() {
               <Tooltip text={`${nonDynamoSelectedCount} manually shortlisted of ${maxContacts} cap · ${dynamoSelectedCount} Dynamo auto-accepted (not capped)`}>
                 <div className="cursor-default">
                   <div className="flex items-baseline gap-1 justify-end">
-                    <span className="text-2xl font-semibold text-qnavy-800">{nonDynamoSelectedCount}</span>
+                    <span className="font-display font-bold text-2xl text-qgreen-700">{nonDynamoSelectedCount}</span>
                     <span className="text-qgray-400 text-base font-medium">/ {maxContacts}</span>
                   </div>
                   <div className="text-xs text-qgray-500 mt-0.5 text-right">
@@ -438,7 +476,7 @@ export default function FirmDetail() {
                 disabled={statusSaving}
                 className="btn-primary"
               >
-                {statusSaving ? 'Saving…' : 'Mark Complete ✓'}
+                {statusSaving ? 'Saving…' : '✓ Done — Next Firm →'}
               </button>
             )}
           </div>
@@ -452,15 +490,15 @@ export default function FirmDetail() {
         <div className="border-b border-qgray-200 px-4 flex items-center gap-0 bg-qgray-50">
           <button
             onClick={() => setTab('available')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap
+            className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap
               ${tab === 'available'
-                ? 'border-qnavy-700 text-qnavy-800'
+                ? 'border-qgreen-700 text-qgreen-800'
                 : 'border-transparent text-qgray-500 hover:text-qgray-700'}`}
           >
             Available contacts
             {availableContacts.length > 0 && (
               <span className={`ml-1.5 px-1.5 py-0.5 rounded text-xs
-                ${tab === 'available' ? 'bg-qnavy-100 text-qnavy-700' : 'bg-qgray-100 text-qgray-600'}`}>
+                ${tab === 'available' ? 'bg-qgreen-100 text-qgreen-700' : 'bg-qgray-100 text-qgray-600'}`}>
                 {availableContacts.length}
               </span>
             )}
@@ -468,7 +506,7 @@ export default function FirmDetail() {
 
           <button
             onClick={() => setTab('pending')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap
+            className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap
               ${tab === 'pending'
                 ? 'border-amber-500 text-amber-700'
                 : 'border-transparent text-qgray-500 hover:text-qgray-700'}`}
@@ -502,7 +540,7 @@ export default function FirmDetail() {
                   </span>
                 )}
                 {filteredSelected.length > 0 && (
-                  <span className="font-medium text-qnavy-700 bg-qnavy-50 border border-qnavy-100 px-2 py-1 rounded">
+                  <span className="font-medium text-qgreen-700 bg-qgreen-50 border border-qgreen-100 px-2 py-1 rounded">
                     {filteredSelected.length} shortlisted
                   </span>
                 )}
@@ -517,7 +555,7 @@ export default function FirmDetail() {
                     <th className="px-4 py-2.5 text-left">
                       <button onClick={() => toggleSort('name')}
                         className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider
-                          ${sortField === 'name' ? 'text-qnavy-800' : 'text-qgray-500 hover:text-qgray-700'}`}>
+                          ${sortField === 'name' ? 'text-qgreen-800' : 'text-qgray-500 hover:text-qgray-700'}`}>
                         Name / Title
                         <span className="text-qgray-400">{sortField === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
                       </button>
@@ -525,7 +563,7 @@ export default function FirmDetail() {
                     <th className="px-4 py-2.5 text-left">
                       <button onClick={() => toggleSort('source')}
                         className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider
-                          ${sortField === 'source' ? 'text-qnavy-800' : 'text-qgray-500 hover:text-qgray-700'}`}>
+                          ${sortField === 'source' ? 'text-qgreen-800' : 'text-qgray-500 hover:text-qgray-700'}`}>
                         Source
                         <span className="text-qgray-400">{sortField === 'source' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
                       </button>
@@ -536,7 +574,7 @@ export default function FirmDetail() {
                       <Tooltip text="Advisory score (0–100) based on seniority and role match. Never auto-selects.">
                         <button onClick={() => toggleSort('score')}
                           className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider mx-auto
-                            ${sortField === 'score' ? 'text-qnavy-800' : 'text-qgray-500 hover:text-qgray-700'}`}>
+                            ${sortField === 'score' ? 'text-qgreen-800' : 'text-qgray-500 hover:text-qgray-700'}`}>
                           Score
                           <span className="text-qgray-400">{sortField === 'score' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
                         </button>
@@ -577,8 +615,8 @@ export default function FirmDetail() {
                       {filteredSelected.length > 0 && (
                         <>
                           <tr>
-                            <td colSpan={6} className="px-4 py-1.5 bg-qnavy-50 border-b border-qnavy-100">
-                              <span className="text-2xs font-semibold text-qnavy-700 uppercase tracking-wider">
+                            <td colSpan={6} className="px-4 py-1.5 bg-qgreen-50 border-b border-qgreen-100">
+                              <span className="text-2xs font-semibold text-qgreen-700 uppercase tracking-wider">
                                 Shortlisted · {filteredSelected.length} / {maxContacts}
                               </span>
                             </td>

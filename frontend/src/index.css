@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -57,14 +57,14 @@
   .input {
     @apply w-full border border-qgray-300 bg-white rounded-lg px-3 py-2 text-sm text-qgray-900
            placeholder:text-qgray-400
-           focus:outline-none focus:ring-2 focus:ring-qnavy-300 focus:border-qnavy-500
+           focus:outline-none focus:ring-2 focus:ring-qgreen-300 focus:border-qgreen-500
            transition-colors duration-150;
   }
 
   /* Base select — used by SelectFilter for styling */
   .select {
     @apply border border-qgray-300 bg-white rounded-lg px-3 py-2 text-sm text-qgray-700
-           focus:outline-none focus:ring-2 focus:ring-qnavy-300 focus:border-qnavy-500
+           focus:outline-none focus:ring-2 focus:ring-qgreen-300 focus:border-qgreen-500
            transition-colors duration-150 cursor-pointer;
     appearance: none;
     -webkit-appearance: none;
@@ -75,7 +75,7 @@
   }
 
   .select.active {
-    @apply border-qnavy-500 text-qnavy-800 bg-qnavy-50 ring-2 ring-qnavy-200;
+    @apply border-qgreen-500 text-qgreen-800 bg-qgreen-50 ring-2 ring-qgreen-200;
   }
 
   /* ─── Cards ───────────────────────────────────────────────── */
@@ -89,7 +89,7 @@
 
   /* ─── Table ───────────────────────────────────────────────── */
   .table-row {
-    @apply border-b border-qgray-100 hover:bg-qnavy-50 transition-colors cursor-pointer;
+    @apply border-b border-qgray-100 hover:bg-qgreen-50 transition-colors cursor-pointer;
   }
 
   /* ─── Stat Cards ──────────────────────────────────────────── */

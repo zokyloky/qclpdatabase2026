@@ -28,16 +28,16 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-qnavy-800">
+    <div className="min-h-screen flex items-center justify-center bg-qgreen-900">
       <div className="w-full max-w-sm px-4">
 
         {/* Brand mark */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-qteal-600 mb-4 shadow-lg">
-            <span className="text-white font-bold text-2xl leading-none">Q</span>
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-white/15 border border-white/20 mb-4 shadow-lg">
+            <span className="text-white font-display font-bold text-2xl leading-none">Q</span>
           </div>
-          <h1 className="text-xl font-semibold text-white tracking-wide">LP Intelligence</h1>
-          <p className="text-qnavy-300 text-sm mt-1 tracking-widest font-medium uppercase text-xs">Quadria Capital</p>
+          <h1 className="font-display font-bold text-2xl text-white tracking-tight">Quadria Capital</h1>
+          <p className="text-green-200 text-xs mt-1 tracking-widest font-semibold uppercase">Internal LP Database</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl p-8">

@@ -23,7 +23,7 @@ function Tooltip({ text, children }) {
     >
       {children}
       {visible && (
-        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 text-xs text-white bg-qnavy-800 rounded-lg shadow-lg leading-snug pointer-events-none whitespace-normal">
+        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 text-xs text-white bg-qgreen-800 rounded-lg shadow-lg leading-snug pointer-events-none whitespace-normal">
           {text}
         </span>
       )}
@@ -34,7 +34,7 @@ function Tooltip({ text, children }) {
 // Source pill
 function SourcePill({ source }) {
   const config = {
-    both:        { label: 'D+P', className: 'bg-qnavy-50 text-qnavy-700 border border-qnavy-200', tip: 'Matched across both Dynamo and Preqin.' },
+    both:        { label: 'D+P', className: 'bg-qgreen-50 text-qgreen-700 border border-qgreen-200', tip: 'Matched across both Dynamo and Preqin.' },
     dynamo_only: { label: 'D',   className: 'bg-purple-50 text-purple-700 border border-purple-200', tip: 'Dynamo only — no Preqin match found.' },
     preqin_only: { label: 'P',   className: 'bg-sky-50 text-sky-700 border border-sky-200',    tip: 'Preqin only — not currently in Dynamo.' },
   }
@@ -78,7 +78,7 @@ function ContactsCell({ firm, maxContacts }) {
   return (
     <Tooltip text={`${nonDynamoSelected} shortlisted (excl. ${dynamo_count || 0} Dynamo auto-accepted) · ${remaining} slot${remaining !== 1 ? 's' : ''} remaining (cap: ${maxContacts})`}>
       <span className="text-xs cursor-default">
-        <span className={`font-semibold ${nonDynamoSelected > 0 ? 'text-qnavy-700' : 'text-qgray-400'}`}>
+        <span className={`font-semibold ${nonDynamoSelected > 0 ? 'text-qgreen-700' : 'text-qgray-400'}`}>
           {nonDynamoSelected} / {maxContacts}
         </span>
         <span className="text-qgray-400 ml-1">shortlisted</span>
@@ -113,7 +113,7 @@ function SortableHeader({ label, col, current, dir, onSort, tooltip }) {
     <button
       onClick={() => onSort(col)}
       className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider transition-colors
-        ${active ? 'text-qnavy-800' : 'text-qgray-500 hover:text-qgray-700'}`}
+        ${active ? 'text-qgreen-800' : 'text-qgray-500 hover:text-qgray-700'}`}
     >
       {label}
       <span className="text-qgray-400 text-xs">{active ? (dir === 'asc' ? '↑' : '↓') : '↕'}</span>
@@ -146,14 +146,14 @@ function StatCard({ label, value, sub, color, dot, tip, warn }) {
         <span className="text-2xs font-semibold text-qgray-500 uppercase tracking-wider leading-none">{label}</span>
         <InfoIcon />
         {hovered && tip && (
-          <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 text-xs text-white bg-qnavy-800 rounded-lg shadow-lg leading-snug pointer-events-none whitespace-normal">
+          <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 text-xs text-white bg-qgreen-800 rounded-lg shadow-lg leading-snug pointer-events-none whitespace-normal">
             {tip}
           </span>
         )}
       </div>
-      <div className={`text-2xl font-semibold ${warn ? 'text-amber-700' : color}`}>
+      <div className={`font-display font-bold text-2xl tracking-tight ${warn ? 'text-amber-700' : color}`}>
         {value ?? '—'}
-        {sub && <span className="text-sm font-normal text-qgray-400 ml-1.5">{sub}</span>}
+        {sub && <span className="text-sm font-sans font-normal text-qgray-400 ml-1.5">{sub}</span>}
       </div>
     </div>
   )
@@ -196,7 +196,7 @@ function StatsBar({ stats }) {
             tip="Firms with available contacts that haven't been opened yet."
           />
           <StatCard
-            label="In Progress" dot="bg-qnavy-500" color="text-qnavy-700"
+            label="In Progress" dot="bg-qgreen-500" color="text-qgreen-700"
             value={(stats.firms_in_progress ?? 0).toLocaleString()}
             tip="Firms where contact selection has started but not yet marked complete."
           />
@@ -214,7 +214,7 @@ function StatsBar({ stats }) {
         <p className="text-2xs font-semibold text-qgray-400 uppercase tracking-widest mb-1.5 px-0.5">Contacts</p>
         <div className="grid grid-cols-2 gap-3">
           <StatCard
-            label="Shortlisted" dot="bg-qnavy-800" color="text-qnavy-800"
+            label="Shortlisted" dot="bg-qgreen-800" color="text-qgreen-800"
             value={(stats.selected ?? 0).toLocaleString()}
             tip="Total contacts shortlisted across all firms (Dynamo auto-accepted + manually selected)."
           />
@@ -254,7 +254,8 @@ export default function FirmList() {
   const [firms, setFirms]             = useState([])
   const [total, setTotal]             = useState(0)
   const [page, setPage]               = useState(1)
-  const [loading, setLoading]         = useState(true)
+  const [loading, setLoading]         = useState(true)   // first-ever load
+  const [refreshing, setRefreshing]   = useState(false)  // subsequent reloads (keep rows visible)
   const [exporting, setExporting]     = useState(false)
   const [options, setOptions]         = useState({ institution_types: [], regions: [], countries: [], cities: [] })
   const [stats, setStats]             = useState(null)
@@ -283,7 +284,8 @@ export default function FirmList() {
   }, [])
 
   const loadFirms = useCallback(async () => {
-    setLoading(true)
+    // First load: show full loading state. Subsequent: dim the table so it feels instant.
+    setRefreshing(true)
     try {
       const data = await getFirms({
         search:              debouncedSearch,
@@ -301,10 +303,11 @@ export default function FirmList() {
       })
       setFirms(data.firms)
       setTotal(data.total)
+      setLoading(false)
     } catch (err) {
       console.error(err)
     } finally {
-      setLoading(false)
+      setRefreshing(false)
     }
   }, [debouncedSearch, sourceFilter, instType, region, country, city, wfStatus, showNoContacts, page, sortBy, sortDir])
 
@@ -387,7 +390,7 @@ export default function FirmList() {
 
           <div className="flex items-end gap-2 ml-auto flex-shrink-0">
             {activeFilterCount > 0 && (
-              <button onClick={clearFilters} className="text-sm text-qnavy-600 hover:text-qnavy-800 font-medium py-2 whitespace-nowrap">
+              <button onClick={clearFilters} className="text-sm text-qgreen-700 hover:text-qgreen-800 font-medium py-2 whitespace-nowrap">
                 Clear filters ({activeFilterCount})
               </button>
             )}
@@ -446,8 +449,9 @@ export default function FirmList() {
       <div className="card overflow-hidden">
         {/* Table toolbar */}
         <div className="px-4 py-2.5 border-b border-qgray-100 flex items-center justify-between bg-qgray-50">
-          <span className="text-sm text-qgray-500">
-            {loading ? 'Loading…' : `${total.toLocaleString()} firm${total !== 1 ? 's' : ''}`}
+          <span className="text-sm text-qgray-500 flex items-center gap-2">
+            {`${total.toLocaleString()} firm${total !== 1 ? 's' : ''}`}
+            {refreshing && <span className="text-xs text-qgray-400 animate-pulse">Updating…</span>}
           </span>
           <div className="flex items-center gap-4 text-sm text-qgray-500">
             <Tooltip text="Global cap per firm for non-Dynamo contacts. Advisory — not enforced.">
@@ -469,7 +473,7 @@ export default function FirmList() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className={`overflow-x-auto transition-opacity duration-200 ${refreshing ? 'opacity-50' : 'opacity-100'}`}>
           <table className="w-full">
             <thead>
               <tr className="border-b border-qgray-200 bg-qgray-50">
@@ -503,7 +507,7 @@ export default function FirmList() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {loading && firms.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="text-center py-16 text-qgray-400 text-sm">Loading…</td>
                 </tr>
@@ -512,7 +516,7 @@ export default function FirmList() {
                   <td colSpan={8} className="text-center py-16 text-qgray-400 text-sm">
                     No firms match your filters.{' '}
                     {activeFilterCount > 0 && (
-                      <button onClick={clearFilters} className="text-qnavy-600 hover:underline">Clear filters</button>
+                      <button onClick={clearFilters} className="text-qgreen-700 hover:underline">Clear filters</button>
                     )}
                   </td>
                 </tr>
@@ -526,7 +530,7 @@ export default function FirmList() {
                     className={`border-b border-qgray-50 transition-colors
                       ${noContacts
                         ? 'opacity-40 cursor-default'
-                        : 'hover:bg-qnavy-50 cursor-pointer'}`}
+                        : 'hover:bg-qgreen-50 cursor-pointer'}`}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
@@ -605,7 +609,7 @@ export default function FirmList() {
                       {!noContacts && (
                         <button
                           onClick={e => { e.stopPropagation(); navigate(`/firms/${firm.id}`) }}
-                          className="text-sm text-qnavy-600 hover:text-qnavy-800 font-medium whitespace-nowrap"
+                          className="text-sm text-qgreen-700 hover:text-qgreen-800 font-medium whitespace-nowrap"
                         >
                           Review →
                         </button>

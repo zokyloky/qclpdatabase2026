@@ -69,15 +69,16 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Plus Jakarta Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        sans:    ['Plus Jakarta Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        display: ['Outfit', 'Plus Jakarta Sans', '-apple-system', 'sans-serif'],
       },
       fontSize: {
         '2xs': ['0.625rem', { lineHeight: '1rem' }],
       },
       boxShadow: {
-        'card': '0 1px 3px 0 rgba(19, 37, 70, 0.08), 0 1px 2px -1px rgba(19, 37, 70, 0.06)',
-        'card-hover': '0 4px 12px 0 rgba(19, 37, 70, 0.12), 0 2px 4px -1px rgba(19, 37, 70, 0.08)',
-        'nav': '0 1px 0 0 rgba(19, 37, 70, 0.1)',
+        'card':      '0 1px 3px 0 rgba(30, 114, 63, 0.07), 0 1px 2px -1px rgba(30, 114, 63, 0.05)',
+        'card-hover':'0 4px 12px 0 rgba(30, 114, 63, 0.12), 0 2px 4px -1px rgba(30, 114, 63, 0.08)',
+        'nav':       '0 1px 0 0 rgba(30, 114, 63, 0.15)',
       },
     }
   },

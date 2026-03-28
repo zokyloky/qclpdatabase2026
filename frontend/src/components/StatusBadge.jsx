@@ -9,7 +9,7 @@ const BADGE_CONFIG = {
   },
   in_progress: {
     label: 'In Progress',
-    className: 'bg-qnavy-50 text-qnavy-700 border border-qnavy-200',
+    className: 'bg-qgreen-50 text-qgreen-700 border border-qgreen-200',
   },
   complete: {
     label: 'Complete',

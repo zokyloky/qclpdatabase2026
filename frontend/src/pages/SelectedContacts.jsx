@@ -11,6 +11,24 @@ function useDebounce(value, delay = 300) {
   return debounced
 }
 
+// Inline icon components
+function EmailIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M2 7l10 7 10-7" />
+    </svg>
+  )
+}
+
+function LinkedInIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+    </svg>
+  )
+}
+
 export default function SelectedContacts() {
   const navigate = useNavigate()
   const [contacts, setContacts] = useState([])
@@ -84,7 +102,7 @@ export default function SelectedContacts() {
       <button
         onClick={() => toggleSort(field)}
         className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider transition-colors
-          ${active ? 'text-qnavy-800' : 'text-qgray-500 hover:text-qgray-700'}`}
+          ${active ? 'text-qgreen-800' : 'text-qgray-500 hover:text-qgray-700'}`}
       >
         {label}
         <span className="text-qgray-400">{active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
@@ -100,7 +118,7 @@ export default function SelectedContacts() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-qgray-900">Selected Contacts</h1>
+          <h1 className="font-display font-bold text-3xl text-qgray-900 tracking-tight">Selected Contacts</h1>
           <p className="text-sm text-qgray-500 mt-0.5">
             {loading ? 'Loading…' : `${contacts.length} contact${contacts.length !== 1 ? 's' : ''} shortlisted across ${firmCount} firm${firmCount !== 1 ? 's' : ''}`}
           </p>
@@ -164,12 +182,12 @@ export default function SelectedContacts() {
               {grouped.map(group => (
                 <>
                   {/* Firm group header */}
-                  <tr key={`group-${group.lp_firm_id}`} className="bg-qnavy-50 border-b border-qnavy-100">
+                  <tr key={`group-${group.lp_firm_id}`} className="bg-qgreen-50 border-b border-qgreen-100">
                     <td colSpan={7} className="px-4 py-2">
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
                           onClick={() => navigate(`/firms/${group.lp_firm_id}`)}
-                          className="font-semibold text-sm text-qnavy-800 hover:text-qnavy-600 hover:underline"
+                          className="font-semibold text-sm text-qgreen-800 hover:text-qgreen-600 hover:underline"
                         >
                           {group.firm_name}
                         </button>
@@ -179,7 +197,7 @@ export default function SelectedContacts() {
                         {group.country && (
                           <span className="text-xs text-qgray-400">· {group.country}</span>
                         )}
-                        <span className="ml-auto text-xs text-qnavy-700 font-semibold">
+                        <span className="ml-auto text-xs text-qgreen-700 font-semibold">
                           {group.contacts.length} shortlisted
                         </span>
                       </div>
@@ -205,16 +223,16 @@ export default function SelectedContacts() {
                         <td className="px-4 py-2.5 text-center">
                           {c.email
                             ? <a href={`mailto:${c.email}`} title={c.email}
-                                 className="inline-flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity">
-                                <img src="/email.svg" alt="Email" className="w-5 h-5 object-contain" style={{ filter: 'invert(24%) sepia(49%) saturate(573%) hue-rotate(186deg) brightness(90%) contrast(95%)' }} />
+                                 className="inline-flex items-center justify-center text-qgray-400 hover:text-qgreen-700 transition-colors">
+                                <EmailIcon />
                               </a>
                             : <span className="text-qgray-200">—</span>}
                         </td>
                         <td className="px-4 py-2.5 text-center">
                           {c.linkedin_url
                             ? <a href={c.linkedin_url} target="_blank" rel="noopener noreferrer"
-                                 className="inline-flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
-                                <img src="/linkedin.svg" alt="LinkedIn" className="w-5 h-5 object-contain" />
+                                 className="inline-flex items-center justify-center text-qgray-400 hover:text-[#0077B5] transition-colors">
+                                <LinkedInIcon />
                               </a>
                             : <span className="text-qgray-200">—</span>}
                         </td>
@@ -230,7 +248,7 @@ export default function SelectedContacts() {
                         <td className="px-4 py-2.5 text-right">
                           <button
                             onClick={() => navigate(`/firms/${c.lp_firm_id}`)}
-                            className="text-xs text-qnavy-600 hover:text-qnavy-800 font-medium"
+                            className="text-xs text-qgreen-700 hover:text-qgreen-800 font-medium"
                           >
                             View →
                           </button>

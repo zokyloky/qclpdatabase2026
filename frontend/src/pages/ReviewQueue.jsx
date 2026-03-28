@@ -37,7 +37,7 @@ export default function ReviewQueue() {
   return (
     <div className="space-y-4 w-full">
       <div>
-        <h1 className="text-2xl font-semibold text-qgray-900">Review Queue</h1>
+        <h1 className="font-display font-bold text-3xl text-qgray-900 tracking-tight">Review Queue</h1>
         <p className="text-sm text-qgray-500 mt-0.5">
           Contacts with no role tags in Preqin — classify each as Approved or Blacklisted.
           {data.total > 0 && ` ${data.total} remaining.`}
@@ -82,7 +82,7 @@ export default function ReviewQueue() {
                     <td className="px-4 py-3">
                       <button
                         onClick={() => navigate(`/firms/${c.lp_firm_id}`)}
-                        className="text-qnavy-600 hover:text-qnavy-800 hover:underline text-left font-medium"
+                        className="text-qgreen-700 hover:text-qgreen-800 hover:underline text-left font-medium"
                       >
                         {c.display_name || c.lp_name}
                       </button>
@@ -90,7 +90,7 @@ export default function ReviewQueue() {
                     </td>
                     <td className="px-4 py-3 text-qgray-600 text-xs">
                       {c.email ? (
-                        <a href={`mailto:${c.email}`} className="hover:text-qnavy-600">{c.email}</a>
+                        <a href={`mailto:${c.email}`} className="hover:text-qgreen-700">{c.email}</a>
                       ) : <span className="text-qgray-300">No email</span>}
                     </td>
                     <td className="px-4 py-3">
