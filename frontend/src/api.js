@@ -61,7 +61,7 @@ export function isLoggedIn() {
 
 // ── Firms ─────────────────────────────────────────────────────────────────────
 export function getFirms(params = {}) {
-  // Filter out empty strings, null, and undefined — pass everything else
+  // Filter out empty strings, null, and undefined — keep booleans (e.g. include_no_contacts)
   const q = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v != null && v !== undefined))
   ).toString()

@@ -121,11 +121,12 @@ def list_firms(
     country:          Optional[str]  = Query(None),
     city:             Optional[str]  = Query(None),
     investor_status:  Optional[str]  = Query(None),
-    workflow_status:  Optional[str]  = Query(None),
-    page:             int            = Query(1, ge=1),
-    per_page:         int            = Query(50, ge=1, le=200),
-    sort_by:          str            = Query("workflow_priority"),
-    sort_dir:         str            = Query("asc"),
+    workflow_status:    Optional[str]  = Query(None),
+    include_no_contacts: bool          = Query(False),
+    page:               int            = Query(1, ge=1),
+    per_page:           int            = Query(50, ge=1, le=200),
+    sort_by:            str            = Query("workflow_priority"),
+    sort_dir:           str            = Query("asc"),
     db = Depends(get_db),
 ):
     where_clauses = ["f.is_active = 1"]
@@ -170,6 +171,12 @@ def list_firms(
             where_clauses.append("f.workflow_status = %s")
             params.append(workflow_status)
 
+    # By default hide firms with no contacts; include them when explicitly requested
+    if not include_no_contacts and workflow_status != "no_contacts":
+        where_clauses.append(
+            "COALESCE(cs.approved_count, 0) + COALESCE(cs.dynamo_count, 0) > 0"
+        )
+
     where_sql = "WHERE " + " AND ".join(where_clauses)
 
     # Allowed sort columns — workflow_priority uses the CASE expression
@@ -203,6 +210,7 @@ def list_firms(
     SELECT
         f.id, f.lp_name, f.display_name, f.institution_type,
         f.country, f.city, f.region, f.source, f.investor_status, f.aum_usd_mn,
+        f.preqin_firm_id, f.dynamo_internal_id,
         f.workflow_status, f.workflow_completed_at, f.review_reason,
         COALESCE(cs.approved_count, 0)                                        AS approved_count,
         COALESCE(cs.dynamo_count,   0)                                        AS dynamo_count,

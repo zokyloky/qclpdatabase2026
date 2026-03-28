@@ -26,10 +26,23 @@ export default {
           300: '#3EC0B0',
           400: '#1AAD98',
           500: '#0D9A83',
-          600: '#0D8C75', // brand accent
+          600: '#0D8C75',
           700: '#0A7562',
           800: '#075E4E',
           900: '#04473B',
+        },
+        qgreen: {
+          DEFAULT: '#1E723F',
+          50:  '#EBF5EF',
+          100: '#C8E6D3',
+          200: '#92CEA8',
+          300: '#5CB57C',
+          400: '#33A05B',
+          500: '#268B4C',
+          600: '#1F7841',
+          700: '#1E723F', // Quadria brand primary
+          800: '#175B32',
+          900: '#104524',
         },
         qgold: {
           DEFAULT: '#C4943D',
@@ -56,7 +69,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        sans: ['Plus Jakarta Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Helvetica Neue', 'Arial', 'sans-serif'],
       },
       fontSize: {
         '2xs': ['0.625rem', { lineHeight: '1rem' }],

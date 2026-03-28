@@ -26,7 +26,7 @@ export default function Layout() {
           {/* Brand + nav */}
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-2.5 flex-shrink-0">
-              <div className="w-7 h-7 rounded bg-qteal-600 flex items-center justify-center flex-shrink-0">
+              <div className="w-7 h-7 rounded bg-qgreen-700 flex items-center justify-center flex-shrink-0">
                 <span className="text-white font-bold text-sm leading-none select-none">Q</span>
               </div>
               <div className="leading-tight">

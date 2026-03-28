@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -11,7 +11,7 @@
   body {
     height: 100%;
     @apply bg-qgray-100 text-qgray-900 antialiased;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -30,7 +30,7 @@
   /* ─── Buttons ─────────────────────────────────────────────── */
   .btn-primary {
     @apply inline-flex items-center justify-center gap-1.5
-           bg-qnavy-800 hover:bg-qnavy-700 active:bg-qnavy-900
+           bg-qgreen-700 hover:bg-qgreen-600 active:bg-qgreen-800
            text-white font-medium text-sm py-2 px-4 rounded-lg
            transition-all duration-150
            disabled:opacity-50 disabled:cursor-not-allowed

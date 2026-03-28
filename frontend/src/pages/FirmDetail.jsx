@@ -165,7 +165,7 @@ function PendingContactRow({ contact, onStatusChange }) {
           </button>
           <button onClick={() => handleStatus('blacklisted')} disabled={saving}
             className="text-xs px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded hover:bg-red-100 transition-colors disabled:opacity-50">
-            Blacklist
+            Exclude
           </button>
         </div>
       </td>
@@ -173,6 +173,19 @@ function PendingContactRow({ contact, onStatusChange }) {
   )
 }
 
+
+// ── Date formatter ─────────────────────────────────────────────────────────────
+function formatReviewed(isoStr) {
+  if (!isoStr) return null
+  const d = new Date(isoStr)
+  const now = new Date()
+  const diffDays = Math.floor((now - d) / 86400000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays < 7)  return `${diffDays}d ago`
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
 
 // ── Main FirmDetail page ───────────────────────────────────────────────────────
 export default function FirmDetail() {
@@ -353,6 +366,40 @@ export default function FirmDetail() {
                 <Tooltip text="Last outreach date recorded in Dynamo.">
                   <span className="cursor-default">Last activity: {firm.last_activity_date}</span>
                 </Tooltip></>
+              )}
+            </div>
+
+            {/* Firm IDs */}
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              {firm.preqin_firm_id && (
+                <Tooltip text="Preqin Firm ID — use this to look up the firm directly in Preqin.">
+                  <span className="inline-flex items-center gap-1.5 cursor-default">
+                    <span className="text-2xs font-semibold text-qgray-400 uppercase tracking-wider">Preqin ID</span>
+                    <span className="font-bold text-sm text-qgreen-700 bg-qgreen-50 border border-qgreen-300 px-2 py-0.5 rounded-md tracking-wide">
+                      {firm.preqin_firm_id}
+                    </span>
+                  </span>
+                </Tooltip>
+              )}
+              {firm.dynamo_internal_id && (
+                <Tooltip text={`Dynamo Internal ID: ${firm.dynamo_internal_id}`}>
+                  <span className="inline-flex items-center gap-1.5 cursor-default">
+                    <span className="text-2xs font-semibold text-qgray-400 uppercase tracking-wider">Dynamo ID</span>
+                    <span className="font-mono text-xs text-qgray-500 bg-qgray-100 border border-qgray-200 px-2 py-0.5 rounded-md max-w-[14rem] truncate inline-block">
+                      {firm.dynamo_internal_id}
+                    </span>
+                  </span>
+                </Tooltip>
+              )}
+              {firm.workflow_completed_at && (
+                <Tooltip text={`Last marked complete: ${new Date(firm.workflow_completed_at).toLocaleString()}`}>
+                  <span className="inline-flex items-center gap-1.5 cursor-default">
+                    <span className="text-2xs font-semibold text-qgray-400 uppercase tracking-wider">Last Reviewed</span>
+                    <span className="text-xs text-qgray-600 bg-qgray-100 border border-qgray-200 px-2 py-0.5 rounded-md">
+                      {formatReviewed(firm.workflow_completed_at)}
+                    </span>
+                  </span>
+                </Tooltip>
               )}
             </div>
           </div>
