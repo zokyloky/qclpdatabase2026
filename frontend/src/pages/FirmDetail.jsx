@@ -1,8 +1,11 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   getFirm, getFirmContacts, getFirms, updateContact, updateFirmStatus, getSettings, getStats,
 } from '../api'
+
+// Module-level cache for prefetched firm data — persists across navigations within this session
+const firmDataCache = new Map()
 import StatusBadge from '../components/StatusBadge'
 import Breadcrumb from '../components/Breadcrumb'
 
@@ -235,6 +238,7 @@ function formatReviewed(isoStr) {
 export default function FirmDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [firm, setFirm]         = useState(null)
   const [contacts, setContacts] = useState([])
@@ -257,16 +261,32 @@ export default function FirmDetail() {
   const [nextFirm, setNextFirm] = useState(null)
   const [transitioning, setTransitioning] = useState(false)
 
+  // Toast shown when arriving on this page right after saving the previous firm
+  const [savedFlash, setSavedFlash] = useState(null)
+
   useEffect(() => {
     getStats().then(setStats).catch(console.error)
   }, [])
+
+  // Show "saved" toast when arriving after marking a firm complete
+  useEffect(() => {
+    const savedName = location.state?.justSaved
+    if (savedName) {
+      setSavedFlash(savedName)
+      setTimeout(() => setSavedFlash(null), 3000)
+      // Clear from history state so a refresh doesn't re-show it
+      window.history.replaceState({}, '')
+    }
+  }, [location.state?.justSaved])
 
   useEffect(() => {
     let cancelled = false
     async function prefetchNext() {
       const statusPriority = ['needs_attention', 'in_progress', 'unreviewed']
+      const nextFirms = []
+
       for (const status of statusPriority) {
-        if (cancelled) return
+        if (cancelled || nextFirms.length >= 2) break
         try {
           const { firms: candidates } = await getFirms({
             workflow_status: status,
@@ -274,11 +294,40 @@ export default function FirmDetail() {
             sort_by: 'workflow_priority',
             sort_dir: 'asc',
           })
-          const next = candidates.find(
-            f => String(f.id) !== String(id) && (f.available_count > 0 || f.pending_count > 0)
-          )
-          if (next) { if (!cancelled) setNextFirm(next); return }
+          for (const f of candidates) {
+            if (nextFirms.length >= 2) break
+            if (
+              String(f.id) !== String(id) &&
+              (f.available_count > 0 || f.pending_count > 0) &&
+              !nextFirms.find(n => n.id === f.id)
+            ) {
+              nextFirms.push(f)
+            }
+          }
         } catch { /* continue */ }
+      }
+
+      if (cancelled || nextFirms.length === 0) return
+
+      // Set the primary next firm for the "Next:" hint
+      setNextFirm(nextFirms[0])
+
+      // Pre-fetch full data (firm + contacts) for the next 2 firms so navigation is instant
+      for (const nextF of nextFirms) {
+        const key = String(nextF.id)
+        if (!firmDataCache.has(key)) {
+          Promise.all([getFirm(nextF.id), getFirmContacts(nextF.id), getSettings()])
+            .then(([f, c, s]) => {
+              if (!cancelled) {
+                firmDataCache.set(key, {
+                  firm: f,
+                  contacts: c,
+                  maxContacts: s.max_contacts_per_firm ? parseInt(s.max_contacts_per_firm, 10) : 5,
+                })
+              }
+            })
+            .catch(() => {}) // Silent — prefetch is best-effort
+        }
       }
     }
     prefetchNext()
@@ -291,6 +340,24 @@ export default function FirmDetail() {
   }
 
   useEffect(() => {
+    // CRITICAL: always clear the Done overlay when arriving on any firm (incl. after navigation)
+    setStatusSaving(false)
+    setTransitioning(false)
+    setNextFirm(null) // reset so stale "Next:" hint isn't shown until prefetch finishes
+
+    // Serve from prefetch cache if available — makes navigation feel instant
+    const cached = firmDataCache.get(String(id))
+    if (cached) {
+      setFirm(cached.firm)
+      setContacts(cached.contacts)
+      setMaxContacts(cached.maxContacts || 5)
+      setLoading(false)
+      firmDataCache.delete(String(id)) // consume the entry to free memory
+      return
+    }
+
+    setLoading(true)
+    setFirm(null)
     Promise.all([
       getFirm(id),
       getFirmContacts(id),
@@ -386,42 +453,27 @@ export default function FirmDetail() {
   }
 
   async function handleMarkComplete() {
+    const currentId    = id
+    const currentName  = firm?.display_name || firm?.lp_name || 'Firm'
+    const targetFirm   = nextFirm
+
+    // Show the "✓ Done!" checkmark immediately — no waiting on the server
+    setTransitioning(true)
     setStatusSaving(true)
-    setTransitioning(false)
-    try {
-      await updateFirmStatus(id, 'complete')
-      setFirm(f => ({ ...f, workflow_status: 'complete', review_reason: null }))
 
-      // Brief success flash before navigating
-      setTransitioning(true)
-      await new Promise(r => setTimeout(r, 600))
+    // Fire save in the background — do NOT block navigation on it
+    updateFirmStatus(currentId, 'complete').catch(e => {
+      console.error('[FirmDetail] background save failed:', e)
+    })
 
-      // Use pre-fetched next firm if available, otherwise fall back to searching
-      if (nextFirm) {
-        navigate(`/firms/${nextFirm.id}`)
-      } else {
-        // Fallback: search for next firm now
-        const statusPriority = ['needs_attention', 'in_progress', 'unreviewed']
-        let navigated = false
-        for (const status of statusPriority) {
-          if (navigated) break
-          try {
-            const { firms: candidates } = await getFirms({
-              workflow_status: status, per_page: 10,
-              sort_by: 'workflow_priority', sort_dir: 'asc',
-            })
-            const next = candidates.find(
-              f => String(f.id) !== String(id) && (f.available_count > 0 || f.pending_count > 0)
-            )
-            if (next) { navigate(`/firms/${next.id}`); navigated = true }
-          } catch { /* continue */ }
-        }
-        if (!navigated) navigate('/firms')
-      }
-    } catch (e) {
-      alert('Error: ' + e.message)
-      setStatusSaving(false)
-      setTransitioning(false)
+    // Brief visual flash so the user sees the success state
+    await new Promise(r => setTimeout(r, 350))
+
+    // Navigate immediately; pass the firm name so the next page can show a "saved" toast
+    if (targetFirm) {
+      navigate(`/firms/${targetFirm.id}`, { state: { justSaved: currentName } })
+    } else {
+      navigate('/firms')
     }
   }
 
@@ -460,29 +512,32 @@ export default function FirmDetail() {
   return (
     <div className="space-y-5 w-full">
 
-      {/* Full-page overlay — visible while saving & transitioning to the next firm */}
+      {/* Full-page overlay — only shown during the brief "Done!" flash before navigating away */}
       {statusSaving && (
-        <div className="fixed inset-0 bg-white/90 backdrop-blur-sm z-50 flex items-center justify-center transition-opacity duration-300">
+        <div className="fixed inset-0 bg-white/90 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="text-center">
-            {transitioning ? (
-              <>
-                <div className="w-14 h-14 rounded-full bg-qgreen-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
-                  <span className="text-white text-2xl font-bold">✓</span>
-                </div>
-                <p className="text-qgreen-800 font-semibold text-lg">Firm complete!</p>
-                {nextFirm && (
-                  <p className="text-qgray-500 text-sm mt-1">
-                    Moving to <span className="font-medium text-qgray-700">{nextFirm.display_name || nextFirm.lp_name}</span>…
-                  </p>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="w-12 h-12 border-4 border-qgreen-200 border-t-qgreen-700 rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-qgreen-800 font-semibold text-lg">Saving…</p>
-              </>
+            <div className="w-14 h-14 rounded-full bg-qgreen-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
+              <span className="text-white text-2xl font-bold">✓</span>
+            </div>
+            <p className="text-qgreen-800 font-semibold text-lg">Firm complete!</p>
+            {nextFirm && (
+              <p className="text-qgray-500 text-sm mt-1">
+                Moving to <span className="font-medium text-qgray-700">{nextFirm.display_name || nextFirm.lp_name}</span>…
+              </p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* "Saved" toast — shown after arriving here from marking a firm complete */}
+      {savedFlash && (
+        <div className="fixed top-5 right-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl border
+          bg-qgreen-50 border-qgreen-200 text-qgreen-800 shadow-lg text-sm font-medium animate-fade-in">
+          <span className="text-qgreen-600 text-base">✓</span>
+          <span>
+            <span className="font-semibold">{savedFlash}</span>
+            {' '}marked complete &amp; saved
+          </span>
         </div>
       )}
 
@@ -623,7 +678,7 @@ export default function FirmDetail() {
                   disabled={statusSaving}
                   className="btn-primary"
                 >
-                  {statusSaving ? 'Saving…' : '✓ Done'}
+                  ✓ Done
                 </button>
                 {nextFirm && !statusSaving && (
                   <span className="text-2xs text-qgray-400 whitespace-nowrap">

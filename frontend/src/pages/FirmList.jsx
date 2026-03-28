@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getFirms, getOptions, getStats, getSettings, exportContacts } from '../api'
+
+// Module-level page cache so prefetched pages survive filter/sort state changes
+// Key: JSON-stringified params object  Value: { firms, total, ts }
+const firmsPageCache = new Map()
+const CACHE_TTL_MS = 45_000  // 45 s — stale entries are re-fetched transparently
 import StatusBadge from '../components/StatusBadge'
 import Breadcrumb from '../components/Breadcrumb'
 
@@ -285,31 +290,48 @@ export default function FirmList() {
   }, [])
 
   const loadFirms = useCallback(async () => {
-    // First load: show full loading state. Subsequent: dim the table so it feels instant.
-    setRefreshing(true)
-    try {
-      const data = await getFirms({
-        search:              debouncedSearch,
-        source:              sourceFilter,
-        institution_type:    instType,
-        region,
-        country,
-        city,
-        workflow_status:     wfStatus,
-        include_no_contacts: showNoContacts,
-        page,
-        per_page:            PER_PAGE,
-        sort_by:             sortBy,
-        sort_dir:            sortDir,
-      })
-      setFirms(data.firms)
-      setTotal(data.total)
-      setLoading(false)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setRefreshing(false)
+    const params = {
+      search:              debouncedSearch,
+      source:              sourceFilter,
+      institution_type:    instType,
+      region,
+      country,
+      city,
+      workflow_status:     wfStatus,
+      include_no_contacts: showNoContacts,
+      page,
+      per_page:            PER_PAGE,
+      sort_by:             sortBy,
+      sort_dir:            sortDir,
     }
+    const cacheKey = JSON.stringify(params)
+    const cached   = firmsPageCache.get(cacheKey)
+
+    // Serve from cache immediately if fresh — zero-wait navigation
+    if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+      setFirms(cached.firms)
+      setTotal(cached.total)
+      setLoading(false)
+      setRefreshing(false)
+      // Kick off a silent background refresh so data stays current
+      getFirms(params).then(data => {
+        firmsPageCache.set(cacheKey, { firms: data.firms, total: data.total, ts: Date.now() })
+      }).catch(() => {})
+    } else {
+      setRefreshing(true)
+      try {
+        const data = await getFirms(params)
+        firmsPageCache.set(cacheKey, { firms: data.firms, total: data.total, ts: Date.now() })
+        setFirms(data.firms)
+        setTotal(data.total)
+        setLoading(false)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setRefreshing(false)
+      }
+    }
+
   }, [debouncedSearch, sourceFilter, instType, region, country, city, wfStatus, showNoContacts, page, sortBy, sortDir])
 
   useEffect(() => {
@@ -317,6 +339,36 @@ export default function FirmList() {
   }, [debouncedSearch, sourceFilter, instType, region, country, city, wfStatus, showNoContacts, sortBy, sortDir])
 
   useEffect(() => { loadFirms() }, [loadFirms])
+
+  // Prefetch the next 2 pages in the background whenever page / filters change
+  useEffect(() => {
+    if (total === 0) return
+    const baseParams = {
+      search:              debouncedSearch,
+      source:              sourceFilter,
+      institution_type:    instType,
+      region,
+      country,
+      city,
+      workflow_status:     wfStatus,
+      include_no_contacts: showNoContacts,
+      per_page:            PER_PAGE,
+      sort_by:             sortBy,
+      sort_dir:            sortDir,
+    }
+    const pages = Math.max(1, Math.ceil(total / PER_PAGE))
+    ;[page + 1, page + 2].forEach(nextPage => {
+      if (nextPage < 1 || nextPage > pages) return
+      const nextParams   = { ...baseParams, page: nextPage }
+      const nextCacheKey = JSON.stringify(nextParams)
+      const nextCached   = firmsPageCache.get(nextCacheKey)
+      if (!nextCached || Date.now() - nextCached.ts >= CACHE_TTL_MS) {
+        getFirms(nextParams).then(data => {
+          firmsPageCache.set(nextCacheKey, { firms: data.firms, total: data.total, ts: Date.now() })
+        }).catch(() => {})
+      }
+    })
+  }, [page, total, debouncedSearch, sourceFilter, instType, region, country, city, wfStatus, showNoContacts, sortBy, sortDir])
 
   function toggleSort(col) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -467,17 +519,9 @@ export default function FirmList() {
               <span className="cursor-default text-xs font-medium">Cap: {maxContacts} / firm</span>
             </Tooltip>
             {totalPages > 1 && (
-              <div className="flex items-center gap-1">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                  className="px-2 py-0.5 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">
-                  ←
-                </button>
-                <span className="text-xs">{page} / {totalPages}</span>
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                  className="px-2 py-0.5 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">
-                  →
-                </button>
-              </div>
+              <span className="text-xs text-qgray-400 font-medium select-none">
+                Page <span className="font-bold text-qgray-700">{page}</span> of {totalPages}
+              </span>
             )}
           </div>
         </div>
@@ -633,17 +677,85 @@ export default function FirmList() {
 
         {/* Pagination footer */}
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-qgray-100 flex justify-between items-center text-sm text-qgray-500 bg-qgray-50">
-            <span>Page {page} of {totalPages} &middot; {total.toLocaleString()} firms</span>
-            <div className="flex gap-2">
-              <button onClick={() => setPage(1)} disabled={page === 1}
-                className="px-3 py-1 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">First</button>
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                className="px-3 py-1 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">Prev</button>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                className="px-3 py-1 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">Next</button>
-              <button onClick={() => setPage(totalPages)} disabled={page === totalPages}
-                className="px-3 py-1 rounded border border-qgray-200 disabled:opacity-40 hover:bg-white text-xs">Last</button>
+          <div className="px-4 py-3 border-t border-qgray-100 flex justify-between items-center bg-qgray-50 gap-4 flex-wrap">
+            <span className="text-xs text-qgray-500 whitespace-nowrap">
+              {total.toLocaleString()} firm{total !== 1 ? 's' : ''}
+              {' · '}
+              <span className="font-medium text-qgray-700">{((page - 1) * PER_PAGE) + 1}–{Math.min(page * PER_PAGE, total)}</span> shown
+            </span>
+
+            <div className="flex items-center gap-1">
+              {/* Prev arrow */}
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-2 py-1 rounded border border-qgray-200 disabled:opacity-30 hover:bg-white text-qgray-600 text-sm leading-none"
+                title="Previous page"
+              >
+                ←
+              </button>
+
+              {/* Numbered page buttons — show up to 7, collapse with ellipsis */}
+              {(() => {
+                const buttons = []
+                const delta = 2  // pages either side of current
+                const rangeStart = Math.max(2, page - delta)
+                const rangeEnd   = Math.min(totalPages - 1, page + delta)
+
+                // Always show page 1
+                buttons.push(
+                  <button key={1} onClick={() => setPage(1)}
+                    className={`min-w-[2rem] px-2 py-1 rounded border text-xs font-medium transition-colors
+                      ${page === 1
+                        ? 'bg-qgreen-700 text-white border-qgreen-700 shadow-sm'
+                        : 'border-qgray-200 text-qgray-600 hover:bg-white hover:border-qgray-300'}`}
+                  >1</button>
+                )
+
+                if (rangeStart > 2) {
+                  buttons.push(<span key="ellipsis-left" className="px-1 text-xs text-qgray-400 select-none">…</span>)
+                }
+
+                for (let p = rangeStart; p <= rangeEnd; p++) {
+                  const pg = p
+                  buttons.push(
+                    <button key={pg} onClick={() => setPage(pg)}
+                      className={`min-w-[2rem] px-2 py-1 rounded border text-xs font-medium transition-colors
+                        ${page === pg
+                          ? 'bg-qgreen-700 text-white border-qgreen-700 shadow-sm'
+                          : 'border-qgray-200 text-qgray-600 hover:bg-white hover:border-qgray-300'}`}
+                    >{pg}</button>
+                  )
+                }
+
+                if (rangeEnd < totalPages - 1) {
+                  buttons.push(<span key="ellipsis-right" className="px-1 text-xs text-qgray-400 select-none">…</span>)
+                }
+
+                // Always show last page (if more than 1 page total)
+                if (totalPages > 1) {
+                  buttons.push(
+                    <button key={totalPages} onClick={() => setPage(totalPages)}
+                      className={`min-w-[2rem] px-2 py-1 rounded border text-xs font-medium transition-colors
+                        ${page === totalPages
+                          ? 'bg-qgreen-700 text-white border-qgreen-700 shadow-sm'
+                          : 'border-qgray-200 text-qgray-600 hover:bg-white hover:border-qgray-300'}`}
+                    >{totalPages}</button>
+                  )
+                }
+
+                return buttons
+              })()}
+
+              {/* Next arrow */}
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="px-2 py-1 rounded border border-qgray-200 disabled:opacity-30 hover:bg-white text-qgray-600 text-sm leading-none"
+                title="Next page"
+              >
+                →
+              </button>
             </div>
           </div>
         )}
