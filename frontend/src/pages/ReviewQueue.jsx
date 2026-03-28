@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getPendingReview, updateContact } from '../api'
+import { getPendingReview, updateContact, bulkUpdateContacts } from '../api'
 import Breadcrumb from '../components/Breadcrumb'
 
 // Normalise a URL so it has a proper protocol prefix
@@ -21,12 +21,15 @@ function LinkedInIcon({ className = 'w-4 h-4' }) {
 export default function ReviewQueue() {
   const navigate = useNavigate()
 
-  const [data, setData]         = useState({ contacts: [], total: 0, page: 1, pages: 1 })
-  const [page, setPage]         = useState(1)
-  const [loading, setLoading]   = useState(true)
-  const [saving, setSaving]     = useState({})      // contactId → true/false
-  const [removing, setRemoving] = useState({})      // contactId → 'approved'|'rejected'
-  const [flash, setFlash]       = useState(null)    // { name, action } for the toast
+  const [data, setData]           = useState({ contacts: [], total: 0, page: 1, pages: 1 })
+  const [page, setPage]           = useState(1)
+  const [loading, setLoading]     = useState(true)
+  const [saving, setSaving]       = useState({})      // contactId → true/false
+  const [removing, setRemoving]   = useState({})      // contactId → 'approved'|'rejected'
+  const [flash, setFlash]         = useState(null)    // { name, action } for the toast
+  // Multi-select
+  const [selectedIds, setSelectedIds]   = useState(new Set())
+  const [bulkWorking, setBulkWorking]   = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -65,6 +68,54 @@ export default function ReviewQueue() {
     } catch (err) {
       alert('Error: ' + err.message)
       setSaving(s => ({ ...s, [contactId]: false }))
+    }
+  }
+
+  // ── Multi-select helpers ──────────────────────────────────────────────────────
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const visibleIds = useMemo(() => data.contacts.map(c => c.id), [data.contacts])
+  const allSelected  = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
+  const someSelected = visibleIds.some(id => selectedIds.has(id))
+  const selectedCount = visibleIds.filter(id => selectedIds.has(id)).length
+
+  async function handleBulkAction(newStatus) {
+    if (selectedCount === 0 || bulkWorking) return
+    setBulkWorking(true)
+    const ids = visibleIds.filter(id => selectedIds.has(id))
+    try {
+      await bulkUpdateContacts({ contact_ids: ids, filter_status: newStatus })
+      const actionLabel = newStatus === 'approved' ? 'approved' : 'rejected'
+      setFlash({ name: `${ids.length} contacts`, action: actionLabel })
+      setTimeout(() => setFlash(null), 2500)
+      // Animate out all selected rows, then remove them
+      const removeMap = {}
+      ids.forEach(id => { removeMap[id] = newStatus })
+      setRemoving(r => ({ ...r, ...removeMap }))
+      setTimeout(() => {
+        setData(d => ({
+          ...d,
+          total: Math.max(0, d.total - ids.length),
+          contacts: d.contacts.filter(c => !ids.includes(c.id)),
+        }))
+        setRemoving(r => {
+          const n = { ...r }
+          ids.forEach(id => delete n[id])
+          return n
+        })
+      }, 450)
+      setSelectedIds(new Set())
+    } catch (err) {
+      alert('Error: ' + err.message)
+    } finally {
+      setBulkWorking(false)
     }
   }
 
@@ -115,9 +166,63 @@ export default function ReviewQueue() {
             </span>
           </div>
 
+          {/* Bulk action bar */}
+          {selectedCount > 0 && (
+            <div className="px-4 py-2.5 bg-qnavy-800 text-white flex items-center gap-3 flex-wrap border-b border-qnavy-700">
+              <span className="text-sm font-semibold">{selectedCount} selected</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleBulkAction('approved')}
+                  disabled={bulkWorking}
+                  className="text-xs px-3 py-1.5 rounded bg-qteal-600 hover:bg-qteal-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  ✓ Approve Selected
+                </button>
+                <button
+                  onClick={() => handleBulkAction('blacklisted')}
+                  disabled={bulkWorking}
+                  className="text-xs px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  ✕ Reject Selected
+                </button>
+              </div>
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="ml-auto text-xs text-qnavy-300 hover:text-white transition-colors"
+              >
+                Clear selection
+              </button>
+            </div>
+          )}
+
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-qgray-50 border-b border-qgray-200">
+                {/* Select-all checkbox */}
+                <th className="px-3 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected && !allSelected }}
+                    onChange={() => {
+                      if (allSelected) {
+                        setSelectedIds(prev => {
+                          const next = new Set(prev)
+                          visibleIds.forEach(id => next.delete(id))
+                          return next
+                        })
+                      } else {
+                        setSelectedIds(prev => {
+                          const next = new Set(prev)
+                          visibleIds.forEach(id => next.add(id))
+                          return next
+                        })
+                      }
+                    }}
+                    title="Select / deselect all visible contacts"
+                    className="w-3.5 h-3.5 rounded border-qgray-300 cursor-pointer accent-qgreen-700"
+                  />
+                </th>
                 <th className="text-left px-4 py-3 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Contact</th>
                 <th className="text-left px-4 py-3 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Job Title</th>
                 <th className="text-left px-4 py-3 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Firm & Location</th>
@@ -131,6 +236,7 @@ export default function ReviewQueue() {
                 const name = [c.first_name, c.last_name].filter(Boolean).join(' ')
                 const isSaving = saving[c.id]
                 const isRemoving = removing[c.id]
+                const isChecked = selectedIds.has(c.id)
 
                 // Build location string: city, country, region/continent
                 const locationParts = [c.city, c.country, c.region].filter(Boolean)
@@ -140,13 +246,24 @@ export default function ReviewQueue() {
                 return (
                   <tr
                     key={c.id}
-                    className={`border-b border-qgray-100 transition-all duration-400
+                    className={`border-b transition-all duration-400
                       ${isRemoving === 'approved'
                         ? 'bg-green-50 opacity-0 scale-y-0 max-h-0'
                         : isRemoving === 'blacklisted'
                         ? 'bg-red-50 opacity-0 scale-y-0 max-h-0'
-                        : 'opacity-100 hover:bg-qgray-50'}`}
+                        : isChecked
+                        ? 'bg-blue-50 border-blue-100 opacity-100'
+                        : 'border-qgray-100 opacity-100 hover:bg-qgray-50'}`}
                   >
+                    {/* Checkbox */}
+                    <td className="px-3 py-3 w-8">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleSelect(c.id)}
+                        className="w-3.5 h-3.5 rounded border-qgray-300 cursor-pointer accent-qgreen-700"
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-qgray-900">{name || <span className="text-qgray-400">Unknown</span>}</div>
                       {c.qa_flags && (

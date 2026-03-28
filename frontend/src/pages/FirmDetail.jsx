@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
-  getFirm, getFirmContacts, getFirms, updateContact, updateFirmStatus, getSettings, getStats,
+  getFirm, getFirmContacts, getFirms, updateContact, bulkUpdateContacts,
+  updateFirmStatus, getSettings, getStats,
 } from '../api'
 
 // Module-level cache for prefetched firm data — persists across navigations within this session
@@ -53,7 +54,10 @@ function Tooltip({ text, children }) {
 }
 
 // ── Single contact row in the Available tab ────────────────────────────────────
-function AvailableContactRow({ contact, onToggle, onExclude, nonDynamoSelectedCount, maxContacts }) {
+function AvailableContactRow({
+  contact, onToggle, onExclude, nonDynamoSelectedCount, maxContacts,
+  isChecked, onCheck, onSelectAllByTitle,
+}) {
   const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ')
   const isSelected = contact.is_selected === 1
   const isDynamo = contact.source === 'dynamo'
@@ -76,15 +80,40 @@ function AvailableContactRow({ contact, onToggle, onExclude, nonDynamoSelectedCo
   }
 
   return (
-    <tr className={`border-b transition-colors
-      ${isSelected || isDynamo
+    <tr className={`border-b transition-colors group
+      ${isChecked
+        ? 'bg-blue-50 border-blue-100'
+        : isSelected || isDynamo
         ? 'border-qgreen-100 bg-qgreen-50/40 hover:bg-qgreen-50'
         : 'border-qgray-100 hover:bg-qgray-50'}`}>
+
+      {/* Checkbox */}
+      <td className="px-3 py-3 w-8">
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={e => { e.stopPropagation(); onCheck(contact.id) }}
+          className="w-3.5 h-3.5 rounded border-qgray-300 text-qgreen-700 cursor-pointer accent-qgreen-700"
+        />
+      </td>
 
       {/* Name / Title */}
       <td className="px-4 py-3">
         <div className="font-medium text-sm text-qgray-900">{fullName || <span className="text-qgray-400">—</span>}</div>
-        {contact.job_title && <div className="text-xs text-qgray-500 mt-0.5">{contact.job_title}</div>}
+        {contact.job_title && (
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-xs text-qgray-500">{contact.job_title}</span>
+            {onSelectAllByTitle && contact.job_title && (
+              <button
+                onClick={e => { e.stopPropagation(); onSelectAllByTitle(contact.job_title) }}
+                title={`Select all contacts with title "${contact.job_title}"`}
+                className="opacity-0 group-hover:opacity-100 text-2xs text-qgray-400 hover:text-qgreen-700 border border-qgray-200 hover:border-qgreen-400 rounded px-1 py-0.5 transition-all whitespace-nowrap"
+              >
+                ⇑ all
+              </button>
+            )}
+          </div>
+        )}
       </td>
 
       {/* Source */}
@@ -184,7 +213,7 @@ function AvailableContactRow({ contact, onToggle, onExclude, nonDynamoSelectedCo
 }
 
 // ── Contact row in the Under Review tab ───────────────────────────────────────
-function PendingContactRow({ contact, onStatusChange }) {
+function PendingContactRow({ contact, onStatusChange, isChecked, onCheck }) {
   const [saving, setSaving] = useState(false)
   const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ')
 
@@ -195,7 +224,17 @@ function PendingContactRow({ contact, onStatusChange }) {
   }
 
   return (
-    <tr className="border-b border-qgray-100 hover:bg-qgray-50">
+    <tr className={`border-b transition-colors
+      ${isChecked ? 'bg-blue-50 border-blue-100' : 'border-qgray-100 hover:bg-qgray-50'}`}>
+      {/* Checkbox */}
+      <td className="px-3 py-3 w-8">
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={e => { e.stopPropagation(); onCheck(contact.id) }}
+          className="w-3.5 h-3.5 rounded border-qgray-300 text-qgreen-700 cursor-pointer accent-qgreen-700"
+        />
+      </td>
       <td className="px-4 py-3">
         <div className="font-medium text-sm text-qgray-900">{fullName || <span className="text-qgray-400">—</span>}</div>
         {contact.job_title && <div className="text-xs text-qgray-500 mt-0.5">{contact.job_title}</div>}
@@ -253,6 +292,10 @@ export default function FirmDetail() {
   const [linkedinFilter, setLinkedinFilter] = useState(false)
   const [sortField, setSortField]           = useState('score')
   const [sortDir, setSortDir]               = useState('desc')
+
+  // Multi-select state for bulk actions
+  const [selectedForAction, setSelectedForAction] = useState(new Set())
+  const [isBulkWorking, setIsBulkWorking] = useState(false)
 
   // Overall progress stats (fetched once on mount)
   const [stats, setStats] = useState(null)
@@ -345,10 +388,21 @@ export default function FirmDetail() {
     setTransitioning(false)
     setNextFirm(null) // reset so stale "Next:" hint isn't shown until prefetch finishes
 
+    // Helper: auto-complete a firm that has only Dynamo contacts (no manual review needed)
+    function maybeAutoComplete(f, c) {
+      if (f.workflow_status !== 'unreviewed') return f
+      const isDynamoOnly = c.length > 0 && c.every(contact => contact.source === 'dynamo')
+      if (!isDynamoOnly) return f
+      // Fire-and-forget; update local state optimistically
+      updateFirmStatus(f.id, 'complete').catch(console.error)
+      return { ...f, workflow_status: 'complete', workflow_completed_at: new Date().toISOString() }
+    }
+
     // Serve from prefetch cache if available — makes navigation feel instant
     const cached = firmDataCache.get(String(id))
     if (cached) {
-      setFirm(cached.firm)
+      const autoF = maybeAutoComplete(cached.firm, cached.contacts)
+      setFirm(autoF)
       setContacts(cached.contacts)
       setMaxContacts(cached.maxContacts || 5)
       setLoading(false)
@@ -363,7 +417,8 @@ export default function FirmDetail() {
       getFirmContacts(id),
       getSettings(),
     ]).then(([f, c, s]) => {
-      setFirm(f)
+      const autoF = maybeAutoComplete(f, c)
+      setFirm(autoF)
       setContacts(c)
       if (s.max_contacts_per_firm) setMaxContacts(parseInt(s.max_contacts_per_firm, 10))
     }).catch(err => {
@@ -429,6 +484,25 @@ export default function FirmDetail() {
 
   const remainingSlots = Math.max(0, maxContacts - nonDynamoSelectedCount)
 
+  // Multi-select derived values
+  const allAvailableIds = useMemo(() => filteredAvailable.map(c => c.id), [filteredAvailable])
+  const allPendingIds   = useMemo(() => pendingContacts.map(c => c.id),   [pendingContacts])
+
+  const allAvailableSelected = allAvailableIds.length > 0 && allAvailableIds.every(id => selectedForAction.has(id))
+  const allPendingSelected   = allPendingIds.length > 0   && allPendingIds.every(id => selectedForAction.has(id))
+  const someAvailableSelected = allAvailableIds.some(id => selectedForAction.has(id))
+  const somePendingSelected   = allPendingIds.some(id => selectedForAction.has(id))
+
+  // Counts for the bulk action bar
+  const selectedAvailableCount = allAvailableIds.filter(id => selectedForAction.has(id)).length
+  const selectedPendingCount   = allPendingIds.filter(id => selectedForAction.has(id)).length
+
+  // Whether the selection contains at least one non-Dynamo contact (shortlist eligible)
+  const selectedContainNonDynamo = useMemo(() =>
+    filteredAvailable.some(c => selectedForAction.has(c.id) && c.source !== 'dynamo'),
+    [filteredAvailable, selectedForAction]
+  )
+
   // Optimistic update: flip the UI immediately, then sync with the server in the background.
   // If the server call fails, we roll back to the previous value.
   function handleToggle(contactId, value) {
@@ -450,6 +524,97 @@ export default function FirmDetail() {
   async function handleExclude(contactId) {
     await updateContact(contactId, { filter_status: 'blacklisted' })
     setContacts(cs => cs.map(c => c.id === contactId ? { ...c, filter_status: 'blacklisted', is_selected: 0 } : c))
+  }
+
+  // ── Multi-select helpers ────────────────────────────────────────────────────
+  function toggleActionSelect(contactId) {
+    setSelectedForAction(prev => {
+      const next = new Set(prev)
+      if (next.has(contactId)) next.delete(contactId)
+      else next.add(contactId)
+      return next
+    })
+  }
+
+  function clearActionSelect() { setSelectedForAction(new Set()) }
+
+  function selectSection(contactIds) {
+    setSelectedForAction(prev => {
+      const ids = contactIds.map(c => c.id)
+      const allChecked = ids.every(id => prev.has(id))
+      const next = new Set(prev)
+      if (allChecked) ids.forEach(id => next.delete(id))
+      else ids.forEach(id => next.add(id))
+      return next
+    })
+  }
+
+  function handleSelectAllByTitle(title) {
+    // Select ALL contacts in the available list that have this exact job title
+    const ids = filteredAvailable
+      .filter(c => c.job_title === title)
+      .map(c => c.id)
+    setSelectedForAction(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => next.add(id))
+      return next
+    })
+  }
+
+  async function handleBulkShortlist() {
+    if (selectedForAction.size === 0 || isBulkWorking) return
+    setIsBulkWorking(true)
+    try {
+      const ids = filteredAvailable
+        .filter(c => selectedForAction.has(c.id) && c.source !== 'dynamo' && c.is_selected !== 1)
+        .map(c => c.id)
+      if (ids.length > 0) {
+        await bulkUpdateContacts({ contact_ids: ids, is_selected: 1 })
+        setContacts(cs => cs.map(c => ids.includes(c.id) ? { ...c, is_selected: 1 } : c))
+        if (firm?.workflow_status === 'unreviewed') {
+          setFirm(f => ({ ...f, workflow_status: 'in_progress' }))
+        }
+      }
+      clearActionSelect()
+    } catch (e) {
+      alert('Error: ' + e.message)
+    } finally {
+      setIsBulkWorking(false)
+    }
+  }
+
+  async function handleBulkExclude() {
+    if (selectedForAction.size === 0 || isBulkWorking) return
+    setIsBulkWorking(true)
+    try {
+      const ids = [...selectedForAction]
+      await bulkUpdateContacts({ contact_ids: ids, filter_status: 'blacklisted' })
+      setContacts(cs => cs.map(c =>
+        selectedForAction.has(c.id) ? { ...c, filter_status: 'blacklisted', is_selected: 0 } : c
+      ))
+      clearActionSelect()
+    } catch (e) {
+      alert('Error: ' + e.message)
+    } finally {
+      setIsBulkWorking(false)
+    }
+  }
+
+  async function handleBulkPendingStatus(status) {
+    if (selectedForAction.size === 0 || isBulkWorking) return
+    setIsBulkWorking(true)
+    try {
+      const ids = [...selectedForAction]
+      await bulkUpdateContacts({ contact_ids: ids, filter_status: status })
+      setContacts(cs => cs.map(c =>
+        selectedForAction.has(c.id) ? { ...c, filter_status: status, is_selected: 0 } : c
+      ))
+      clearActionSelect()
+    } catch (e) {
+      alert('Error: ' + e.message)
+    } finally {
+      setIsBulkWorking(false)
+    }
   }
 
   async function handleMarkComplete() {
@@ -697,7 +862,7 @@ export default function FirmDetail() {
         {/* Tab bar */}
         <div className="border-b border-qgray-200 px-4 flex items-center gap-0 bg-qgray-50">
           <button
-            onClick={() => setTab('available')}
+            onClick={() => { setTab('available'); clearActionSelect() }}
             className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap
               ${tab === 'available'
                 ? 'border-qgreen-700 text-qgreen-800'
@@ -713,7 +878,7 @@ export default function FirmDetail() {
           </button>
 
           <button
-            onClick={() => setTab('pending')}
+            onClick={() => { setTab('pending'); clearActionSelect() }}
             className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap
               ${tab === 'pending'
                 ? 'border-amber-500 text-amber-700'
@@ -792,10 +957,66 @@ export default function FirmDetail() {
               </div>
             </div>
 
+            {/* Bulk action bar — Available tab */}
+            {selectedAvailableCount > 0 && (
+              <div className="px-4 py-2.5 bg-qnavy-800 text-white flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-semibold">{selectedAvailableCount} selected</span>
+                <div className="flex items-center gap-2">
+                  {selectedContainNonDynamo && (
+                    <button
+                      onClick={handleBulkShortlist}
+                      disabled={isBulkWorking}
+                      className="text-xs px-3 py-1.5 rounded bg-qgreen-600 hover:bg-qgreen-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      ✓ Shortlist Selected
+                    </button>
+                  )}
+                  <button
+                    onClick={handleBulkExclude}
+                    disabled={isBulkWorking}
+                    className="text-xs px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    ✕ Exclude Selected
+                  </button>
+                </div>
+                <button
+                  onClick={clearActionSelect}
+                  className="ml-auto text-xs text-qnavy-300 hover:text-white transition-colors"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-qgray-50 border-b border-qgray-200">
+                    {/* Select-all checkbox */}
+                    <th className="px-3 py-2.5 w-8">
+                      <input
+                        type="checkbox"
+                        checked={allAvailableSelected}
+                        ref={el => { if (el) el.indeterminate = someAvailableSelected && !allAvailableSelected }}
+                        onChange={() => {
+                          if (allAvailableSelected) {
+                            setSelectedForAction(prev => {
+                              const next = new Set(prev)
+                              allAvailableIds.forEach(id => next.delete(id))
+                              return next
+                            })
+                          } else {
+                            setSelectedForAction(prev => {
+                              const next = new Set(prev)
+                              allAvailableIds.forEach(id => next.add(id))
+                              return next
+                            })
+                          }
+                        }}
+                        title="Select / deselect all visible contacts"
+                        className="w-3.5 h-3.5 rounded border-qgray-300 cursor-pointer accent-qgreen-700"
+                      />
+                    </th>
                     <th className="px-4 py-2.5 text-left">
                       <button onClick={() => toggleSort('name')}
                         className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider
@@ -830,7 +1051,7 @@ export default function FirmDetail() {
                 <tbody>
                   {filteredAvailable.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-10 text-qgray-400 text-sm">
+                      <td colSpan={7} className="text-center py-10 text-qgray-400 text-sm">
                         {availableContacts.length === 0
                           ? 'No available contacts for this firm.'
                           : 'No contacts match your filter.'}
@@ -842,6 +1063,16 @@ export default function FirmDetail() {
                       {filteredDynamo.length > 0 && (
                         <>
                           <tr>
+                            <td className="px-3 py-1.5 bg-purple-50 border-b border-purple-100 w-8">
+                              <input
+                                type="checkbox"
+                                checked={filteredDynamo.every(c => selectedForAction.has(c.id))}
+                                ref={el => { if (el) el.indeterminate = filteredDynamo.some(c => selectedForAction.has(c.id)) && !filteredDynamo.every(c => selectedForAction.has(c.id)) }}
+                                onChange={() => selectSection(filteredDynamo)}
+                                className="w-3.5 h-3.5 rounded border-purple-300 cursor-pointer accent-purple-600"
+                                title="Select/deselect all Dynamo contacts"
+                              />
+                            </td>
                             <td colSpan={6} className="px-4 py-1.5 bg-purple-50 border-b border-purple-100">
                               <span className="text-2xs font-semibold text-purple-700 uppercase tracking-wider">
                                 Dynamo — Auto-accepted · {filteredDynamo.length}
@@ -851,7 +1082,10 @@ export default function FirmDetail() {
                           {filteredDynamo.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
                               nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
-                              onExclude={handleExclude} />
+                              onExclude={handleExclude}
+                              isChecked={selectedForAction.has(c.id)}
+                              onCheck={toggleActionSelect}
+                              onSelectAllByTitle={handleSelectAllByTitle} />
                           ))}
                         </>
                       )}
@@ -860,6 +1094,16 @@ export default function FirmDetail() {
                       {filteredSelected.length > 0 && (
                         <>
                           <tr>
+                            <td className="px-3 py-1.5 bg-qgreen-50 border-b border-qgreen-100 w-8">
+                              <input
+                                type="checkbox"
+                                checked={filteredSelected.every(c => selectedForAction.has(c.id))}
+                                ref={el => { if (el) el.indeterminate = filteredSelected.some(c => selectedForAction.has(c.id)) && !filteredSelected.every(c => selectedForAction.has(c.id)) }}
+                                onChange={() => selectSection(filteredSelected)}
+                                className="w-3.5 h-3.5 rounded border-qgreen-300 cursor-pointer accent-qgreen-700"
+                                title="Select/deselect all shortlisted contacts"
+                              />
+                            </td>
                             <td colSpan={6} className="px-4 py-1.5 bg-qgreen-50 border-b border-qgreen-100">
                               <span className="text-2xs font-semibold text-qgreen-700 uppercase tracking-wider">
                                 Shortlisted · {filteredSelected.length} / {maxContacts}
@@ -869,7 +1113,10 @@ export default function FirmDetail() {
                           {filteredSelected.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
                               nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
-                              onExclude={handleExclude} />
+                              onExclude={handleExclude}
+                              isChecked={selectedForAction.has(c.id)}
+                              onCheck={toggleActionSelect}
+                              onSelectAllByTitle={handleSelectAllByTitle} />
                           ))}
                         </>
                       )}
@@ -879,6 +1126,16 @@ export default function FirmDetail() {
                         <>
                           {(filteredDynamo.length > 0 || filteredSelected.length > 0) && (
                             <tr>
+                              <td className="px-3 py-1.5 bg-qgray-50 border-b border-qgray-100 w-8">
+                                <input
+                                  type="checkbox"
+                                  checked={filteredUnselected.every(c => selectedForAction.has(c.id))}
+                                  ref={el => { if (el) el.indeterminate = filteredUnselected.some(c => selectedForAction.has(c.id)) && !filteredUnselected.every(c => selectedForAction.has(c.id)) }}
+                                  onChange={() => selectSection(filteredUnselected)}
+                                  className="w-3.5 h-3.5 rounded border-qgray-300 cursor-pointer accent-qgreen-700"
+                                  title="Select/deselect all available contacts"
+                                />
+                              </td>
                               <td colSpan={6} className="px-4 py-1.5 bg-qgray-50 border-b border-qgray-100">
                                 <span className="text-2xs font-semibold text-qgray-400 uppercase tracking-wider">
                                   Available · {filteredUnselected.length}
@@ -892,7 +1149,10 @@ export default function FirmDetail() {
                           {filteredUnselected.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
                               nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
-                              onExclude={handleExclude} />
+                              onExclude={handleExclude}
+                              isChecked={selectedForAction.has(c.id)}
+                              onCheck={toggleActionSelect}
+                              onSelectAllByTitle={handleSelectAllByTitle} />
                           ))}
                         </>
                       )}
@@ -906,33 +1166,90 @@ export default function FirmDetail() {
 
         {/* Under Review tab content */}
         {tab === 'pending' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-qgray-50 border-b border-qgray-200">
-                  <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Name / Title</th>
-                  <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Email</th>
-                  <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Role tags</th>
-                  <th className="px-4 py-2.5 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingContacts.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="text-center py-10 text-qgray-400 text-sm">
-                      No contacts pending review for this firm.
-                    </td>
+          <>
+            {/* Bulk action bar — Pending tab */}
+            {selectedPendingCount > 0 && (
+              <div className="px-4 py-2.5 bg-qnavy-800 text-white flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-semibold">{selectedPendingCount} selected</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleBulkPendingStatus('approved')}
+                    disabled={isBulkWorking}
+                    className="text-xs px-3 py-1.5 rounded bg-qteal-600 hover:bg-qteal-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    ✓ Approve Selected
+                  </button>
+                  <button
+                    onClick={() => handleBulkPendingStatus('blacklisted')}
+                    disabled={isBulkWorking}
+                    className="text-xs px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    ✕ Reject Selected
+                  </button>
+                </div>
+                <button
+                  onClick={clearActionSelect}
+                  className="ml-auto text-xs text-qnavy-300 hover:text-white transition-colors"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-qgray-50 border-b border-qgray-200">
+                    {/* Select-all checkbox */}
+                    <th className="px-3 py-2.5 w-8">
+                      <input
+                        type="checkbox"
+                        checked={allPendingSelected}
+                        ref={el => { if (el) el.indeterminate = somePendingSelected && !allPendingSelected }}
+                        onChange={() => {
+                          if (allPendingSelected) {
+                            setSelectedForAction(prev => {
+                              const next = new Set(prev)
+                              allPendingIds.forEach(id => next.delete(id))
+                              return next
+                            })
+                          } else {
+                            setSelectedForAction(prev => {
+                              const next = new Set(prev)
+                              allPendingIds.forEach(id => next.add(id))
+                              return next
+                            })
+                          }
+                        }}
+                        title="Select / deselect all under-review contacts"
+                        className="w-3.5 h-3.5 rounded border-qgray-300 cursor-pointer accent-qgreen-700"
+                      />
+                    </th>
+                    <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Name / Title</th>
+                    <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Email</th>
+                    <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Role tags</th>
+                    <th className="px-4 py-2.5 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Action</th>
                   </tr>
-                ) : pendingContacts.map(c => (
-                  <PendingContactRow
-                    key={c.id}
-                    contact={c}
-                    onStatusChange={handleStatusChange}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pendingContacts.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-10 text-qgray-400 text-sm">
+                        No contacts pending review for this firm.
+                      </td>
+                    </tr>
+                  ) : pendingContacts.map(c => (
+                    <PendingContactRow
+                      key={c.id}
+                      contact={c}
+                      onStatusChange={handleStatusChange}
+                      isChecked={selectedForAction.has(c.id)}
+                      onCheck={toggleActionSelect}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

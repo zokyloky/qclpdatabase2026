@@ -81,6 +81,10 @@ export function updateSettings(u){ return patch('/settings', u) }
 // ── Contacts ──────────────────────────────────────────────────────────────────
 export function getFirmContacts(firmId)     { return get(`/firms/${firmId}/contacts`) }
 export function updateContact(id, update)   { return patch(`/contacts/${id}`, update) }
+export function bulkUpdateContacts(update)  { return patch('/contacts/bulk-update', update) }
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+export function autoCompleteDynamoOnlyFirms() { return post('/admin/auto-complete-dynamo-only', {}) }
 
 // ── Review Queue ──────────────────────────────────────────────────────────────
 export function getPendingReview(params = {}) {

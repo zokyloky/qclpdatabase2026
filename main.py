@@ -350,6 +350,97 @@ def update_contact(contact_id: str, update: ContactUpdate, db=Depends(get_db)):
     return {"id": contact_id, "updated": True}
 
 
+# ── Bulk contact update ────────────────────────────────────────────────────────
+class BulkContactUpdate(BaseModel):
+    contact_ids:   List[str]
+    is_selected:   Optional[int] = None
+    filter_status: Optional[str] = None
+
+
+@app.patch("/api/contacts/bulk-update", dependencies=[Depends(verify_token)])
+def bulk_update_contacts(update: BulkContactUpdate, db=Depends(get_db)):
+    """Update is_selected and/or filter_status for multiple contacts in one call."""
+    if not update.contact_ids:
+        raise HTTPException(400, "contact_ids must not be empty")
+
+    fields, params = [], []
+    now = datetime.now(timezone.utc).isoformat()
+
+    if update.is_selected is not None:
+        fields.append("is_selected = %s")
+        params.append(update.is_selected)
+
+    if update.filter_status is not None:
+        allowed = ("approved", "blacklisted", "pending_review", "dynamo")
+        if update.filter_status not in allowed:
+            raise HTTPException(400, f"filter_status must be one of {allowed}")
+        fields.append("filter_status = %s")
+        params.append(update.filter_status)
+
+    if not fields:
+        raise HTTPException(400, "Nothing to update")
+
+    fields.append("updated_at = %s")
+    params.append(now)
+
+    placeholders = ", ".join(["%s"] * len(update.contact_ids))
+    params.extend(update.contact_ids)
+
+    sql = f"UPDATE lp_contacts SET {', '.join(fields)} WHERE id IN ({placeholders}) RETURNING id, lp_firm_id"
+    with dict_cursor(db) as cur:
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+
+        # Auto-advance firms to in_progress when user bulk-selects contacts
+        if update.is_selected == 1 and rows:
+            firm_ids = list({r["lp_firm_id"] for r in rows})
+            for fid in firm_ids:
+                cur.execute(
+                    """
+                    UPDATE lp_firms
+                    SET workflow_status = 'in_progress', updated_at = %s
+                    WHERE id = %s AND workflow_status = 'unreviewed'
+                    """,
+                    (now, fid),
+                )
+
+        db.commit()
+    return {"updated": len(rows), "ids": [r["id"] for r in rows]}
+
+
+# ── Admin: auto-complete Dynamo-only firms ─────────────────────────────────────
+@app.post("/api/admin/auto-complete-dynamo-only", dependencies=[Depends(verify_token)])
+def auto_complete_dynamo_only_firms(db=Depends(get_db)):
+    """
+    Mark all 'unreviewed' firms that have ONLY Dynamo contacts (no Preqin
+    approved/pending contacts) as 'complete' — they need no manual review.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with dict_cursor(db) as cur:
+        cur.execute(
+            """
+            UPDATE lp_firms
+            SET workflow_status = 'complete',
+                workflow_completed_at = %s,
+                updated_at = %s
+            WHERE workflow_status = 'unreviewed'
+              AND id IN (
+                  SELECT lp_firm_id
+                  FROM lp_contacts
+                  WHERE is_active = 1
+                  GROUP BY lp_firm_id
+                  HAVING COUNT(*) > 0
+                     AND COUNT(*) FILTER (WHERE source != 'dynamo') = 0
+              )
+            RETURNING id
+            """,
+            (now, now),
+        )
+        rows = cur.fetchall()
+        db.commit()
+    return {"auto_completed": len(rows), "firm_ids": [r["id"] for r in rows]}
+
+
 # ── Pending review queue ──────────────────────────────────────────────────────
 @app.get("/api/review/pending", dependencies=[Depends(verify_token)])
 def pending_review(

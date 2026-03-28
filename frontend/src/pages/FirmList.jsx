@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getFirms, getOptions, getStats, getSettings, exportContacts } from '../api'
+import { getFirms, getOptions, getStats, getSettings, exportContacts, autoCompleteDynamoOnlyFirms } from '../api'
 
 // Module-level page cache so prefetched pages survive filter/sort state changes
 // Key: JSON-stringified params object  Value: { firms, total, ts }
@@ -277,6 +277,8 @@ export default function FirmList() {
   const [showNoContacts, setShowNoContacts] = useState(false)
   const [sortBy, setSortBy]                 = useState('workflow_priority')
   const [sortDir, setSortDir]               = useState('asc')
+  // Used to trigger a re-fetch after background auto-complete runs
+  const [autoCompleteSeed, setAutoCompleteSeed] = useState(0)
 
   const debouncedSearch = useDebounce(search)
   const PER_PAGE = 50
@@ -287,6 +289,16 @@ export default function FirmList() {
     getSettings().then(s => {
       if (s.max_contacts_per_firm) setMaxContacts(parseInt(s.max_contacts_per_firm, 10))
     }).catch(console.error)
+    // Silently mark any Dynamo-only unreviewed firms as complete so they
+    // don't clutter the review queue (Bug #1)
+    autoCompleteDynamoOnlyFirms()
+      .then(result => {
+        if (result.auto_completed > 0) {
+          firmsPageCache.clear()
+          setAutoCompleteSeed(s => s + 1)
+        }
+      })
+      .catch(console.error)
   }, [])
 
   const loadFirms = useCallback(async () => {
@@ -332,7 +344,7 @@ export default function FirmList() {
       }
     }
 
-  }, [debouncedSearch, sourceFilter, instType, region, country, city, wfStatus, showNoContacts, page, sortBy, sortDir])
+  }, [debouncedSearch, sourceFilter, instType, region, country, city, wfStatus, showNoContacts, page, sortBy, sortDir, autoCompleteSeed])
 
   useEffect(() => {
     setPage(1)
