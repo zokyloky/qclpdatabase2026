@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
-  getFirm, getFirmContacts, getFirms, updateContact, updateFirmStatus, getSettings,
+  getFirm, getFirmContacts, getFirms, updateContact, updateFirmStatus, getSettings, getStats,
 } from '../api'
 import StatusBadge from '../components/StatusBadge'
 
@@ -83,7 +83,7 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
           ? <Tooltip text={contact.email}>
               <a href={`mailto:${contact.email}`} onClick={e => e.stopPropagation()}
                  className="inline-flex items-center justify-center text-qgray-400 hover:text-qgreen-700 transition-colors">
-                <EmailIcon className="w-4.5 h-4.5" />
+                <EmailIcon className="w-4 h-4" />
               </a>
             </Tooltip>
           : <span className="text-qgray-200">—</span>}
@@ -96,7 +96,7 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
               <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer"
                  onClick={e => e.stopPropagation()}
                  className="inline-flex items-center justify-center text-qgray-400 hover:text-[#0077B5] transition-colors">
-                <LinkedInIcon className="w-4.5 h-4.5" />
+                <LinkedInIcon className="w-4 h-4" />
               </a>
             </Tooltip>
           : <span className="text-qgray-200">—</span>}
@@ -213,9 +213,18 @@ export default function FirmDetail() {
   const [maxContacts, setMaxContacts] = useState(5)
 
   // Filters / sort for Available tab
-  const [titleFilter, setTitleFilter] = useState('')
-  const [sortField, setSortField]     = useState('score')
-  const [sortDir, setSortDir]         = useState('desc')
+  const [titleFilter, setTitleFilter]       = useState('')
+  const [emailFilter, setEmailFilter]       = useState(false)
+  const [linkedinFilter, setLinkedinFilter] = useState(false)
+  const [sortField, setSortField]           = useState('score')
+  const [sortDir, setSortDir]               = useState('desc')
+
+  // Overall progress stats (fetched once on mount)
+  const [stats, setStats] = useState(null)
+
+  useEffect(() => {
+    getStats().then(setStats).catch(console.error)
+  }, [])
 
   function toggleSort(field) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -259,7 +268,7 @@ export default function FirmDetail() {
     })
   }
 
-  // Apply title filter + sort — Dynamo contacts float to top, then selected, then rest
+  // Apply title filter + email/LinkedIn filters + sort — Dynamo contacts float to top, then selected, then rest
   const { filteredDynamo, filteredSelected, filteredUnselected } = useMemo(() => {
     let list = availableContacts
     if (titleFilter.trim()) {
@@ -267,11 +276,13 @@ export default function FirmDetail() {
       list = list.filter(c => (c.job_title || '').toLowerCase().includes(q) ||
                                (c.first_name + ' ' + c.last_name).toLowerCase().includes(q))
     }
+    if (emailFilter)    list = list.filter(c => c.email)
+    if (linkedinFilter) list = list.filter(c => c.linkedin_url)
     const dynamo = sortContacts(list.filter(c => c.source === 'dynamo'), sortField, sortDir)
     const sel    = sortContacts(list.filter(c => c.source !== 'dynamo' && c.is_selected === 1), sortField, sortDir)
     const unsel  = sortContacts(list.filter(c => c.source !== 'dynamo' && c.is_selected !== 1), sortField, sortDir)
     return { filteredDynamo: dynamo, filteredSelected: sel, filteredUnselected: unsel }
-  }, [availableContacts, titleFilter, sortField, sortDir])
+  }, [availableContacts, titleFilter, emailFilter, linkedinFilter, sortField, sortDir])
 
   const filteredAvailable = useMemo(
     () => [...filteredDynamo, ...filteredSelected, ...filteredUnselected],
@@ -354,8 +365,22 @@ export default function FirmDetail() {
     }
   }
 
-  if (loading) return <div className="text-center py-20 text-qgray-400">Loading…</div>
-  if (!firm)   return null
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center py-32 text-center">
+      <div className="w-10 h-10 border-4 border-qgreen-200 border-t-qgreen-700 rounded-full animate-spin mb-4"></div>
+      <p className="text-qgray-600 font-medium text-base">Loading firm…</p>
+      <p className="text-sm text-qgray-400 mt-1">Fetching contacts and details</p>
+    </div>
+  )
+  if (!firm) return null
+
+  // Compute progress from fetched stats
+  const pctComplete   = stats && stats.total_firms > 0
+    ? Math.round((stats.firms_complete / stats.total_firms) * 100)
+    : null
+  const firmsRemaining = stats
+    ? (stats.firms_unreviewed || 0) + (stats.firms_in_progress || 0) + (stats.firms_needs_attention || 0)
+    : null
 
   const isComplete       = firm.workflow_status === 'complete'
   const needsAttention   = firm.workflow_status === 'needs_attention'
@@ -363,11 +388,45 @@ export default function FirmDetail() {
   return (
     <div className="space-y-5 w-full">
 
-      {/* Back */}
-      <button onClick={() => navigate('/firms')}
-        className="text-sm text-qgray-500 hover:text-qgreen-700 flex items-center gap-1 font-medium transition-colors">
-        ← Back to firms
-      </button>
+      {/* Full-page loading overlay — visible while saving & navigating to the next firm */}
+      {statusSaving && (
+        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-qgreen-200 border-t-qgreen-700 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-qgreen-800 font-semibold text-lg">Saving &amp; loading next firm…</p>
+            <p className="text-qgray-500 text-sm mt-1">This will only take a moment.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Back + progress strip */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <button onClick={() => navigate('/firms')}
+          className="text-sm text-qgray-500 hover:text-qgreen-700 flex items-center gap-1 font-medium transition-colors flex-shrink-0">
+          ← Back to firms
+        </button>
+
+        {/* Overall progress tracker */}
+        {pctComplete !== null && (
+          <div className="flex items-center gap-3 bg-white border border-qgray-200 rounded-xl px-4 py-2 shadow-sm flex-1 max-w-sm min-w-48">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-2xs font-semibold text-qgray-500 uppercase tracking-wider">Overall Progress</span>
+                <span className="text-xs font-bold text-qgreen-700">{pctComplete}%</span>
+              </div>
+              <div className="w-full bg-qgray-200 rounded-full h-1.5">
+                <div
+                  className="bg-qgreen-600 h-1.5 rounded-full transition-all duration-500"
+                  style={{ width: `${pctComplete}%` }}
+                />
+              </div>
+            </div>
+            <div className="text-xs text-qgray-500 flex-shrink-0 whitespace-nowrap">
+              <span className="font-semibold text-qgray-700">{firmsRemaining}</span> remaining
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Needs Attention banner */}
       {needsAttention && firm.review_reason && (
@@ -525,14 +584,50 @@ export default function FirmDetail() {
         {tab === 'available' && (
           <>
             {/* Filter bar */}
-            <div className="px-4 py-2.5 border-b border-qgray-100 flex items-center gap-3 bg-white">
+            <div className="px-4 py-2.5 border-b border-qgray-100 flex items-center gap-3 bg-white flex-wrap">
               <input
                 type="search"
                 placeholder="Filter by name or title…"
                 value={titleFilter}
                 onChange={e => setTitleFilter(e.target.value)}
-                className="input text-sm py-1.5 flex-1 max-w-64"
+                className="input text-sm py-1.5 flex-1 min-w-36 max-w-64"
               />
+
+              {/* Email filter toggle */}
+              <button
+                onClick={() => setEmailFilter(f => !f)}
+                title={emailFilter ? 'Showing contacts with email only — click to clear' : 'Filter to contacts with email'}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0
+                  ${emailFilter
+                    ? 'bg-qgreen-700 text-white border-qgreen-700'
+                    : 'bg-white text-qgray-600 border-qgray-300 hover:border-qgreen-500 hover:text-qgreen-700'}`}
+              >
+                <EmailIcon className="w-3.5 h-3.5" />
+                Has Email
+              </button>
+
+              {/* LinkedIn filter toggle */}
+              <button
+                onClick={() => setLinkedinFilter(f => !f)}
+                title={linkedinFilter ? 'Showing contacts with LinkedIn only — click to clear' : 'Filter to contacts with LinkedIn'}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0
+                  ${linkedinFilter
+                    ? 'bg-[#0077B5] text-white border-[#0077B5]'
+                    : 'bg-white text-qgray-600 border-qgray-300 hover:border-[#0077B5] hover:text-[#0077B5]'}`}
+              >
+                <LinkedInIcon className="w-3.5 h-3.5" />
+                Has LinkedIn
+              </button>
+
+              {(emailFilter || linkedinFilter) && (
+                <button
+                  onClick={() => { setEmailFilter(false); setLinkedinFilter(false) }}
+                  className="text-xs text-qgray-500 hover:text-qgray-700 underline flex-shrink-0"
+                >
+                  Clear
+                </button>
+              )}
+
               <div className="flex items-center gap-3 ml-auto text-xs text-qgray-400">
                 {filteredDynamo.length > 0 && (
                   <span className="font-medium text-purple-600 bg-purple-50 border border-purple-100 px-2 py-1 rounded">

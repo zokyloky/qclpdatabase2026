@@ -1056,8 +1056,20 @@ def get_stats(db=Depends(get_db)):
     with dict_cursor(db) as cur:
         cur.execute("""
             SELECT
-                (SELECT COUNT(*) FROM lp_firms WHERE is_active = 1)                                         AS total_firms,
-                (SELECT COUNT(*) FROM lp_firms WHERE workflow_status = 'unreviewed'      AND is_active = 1)  AS firms_unreviewed,
+                -- Only count firms that have at least one actionable contact (approved/dynamo/pending)
+                -- so that no-contact firms don't skew the completion rate denominator
+                (SELECT COUNT(*) FROM lp_firms f WHERE f.is_active = 1
+                 AND EXISTS (
+                   SELECT 1 FROM lp_contacts c WHERE c.lp_firm_id = f.id AND c.is_active = 1
+                   AND c.filter_status IN ('approved', 'dynamo', 'pending_review')
+                 ))                                                                                           AS total_firms,
+                -- Unreviewed: exclude firms with no actionable contacts
+                (SELECT COUNT(*) FROM lp_firms f WHERE f.is_active = 1
+                 AND f.workflow_status = 'unreviewed'
+                 AND EXISTS (
+                   SELECT 1 FROM lp_contacts c WHERE c.lp_firm_id = f.id AND c.is_active = 1
+                   AND c.filter_status IN ('approved', 'dynamo', 'pending_review')
+                 ))                                                                                           AS firms_unreviewed,
                 (SELECT COUNT(*) FROM lp_firms WHERE workflow_status = 'in_progress'     AND is_active = 1)  AS firms_in_progress,
                 (SELECT COUNT(*) FROM lp_firms WHERE workflow_status = 'complete'        AND is_active = 1)  AS firms_complete,
                 (SELECT COUNT(*) FROM lp_firms WHERE workflow_status = 'needs_attention' AND is_active = 1)  AS firms_needs_attention,
