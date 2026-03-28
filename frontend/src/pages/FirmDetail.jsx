@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
-  getFirm, getFirmContacts, updateContact, updateFirmStatus,
-  getOutreach, createOutreach, deleteOutreach, getSettings,
+  getFirm, getFirmContacts, updateContact, updateFirmStatus, getSettings,
 } from '../api'
 import StatusBadge from '../components/StatusBadge'
 
@@ -37,28 +36,10 @@ function AvailableContactRow({ contact, onToggle, selectedCount, maxContacts }) 
   }
 
   return (
-    <tr className="border-b border-gray-100 hover:bg-gray-50">
-      {/* Shortlist toggle */}
-      <td className="px-4 py-3 w-10">
-        <Tooltip text={
-          atCap
-            ? `You've reached the ${maxContacts}-contact cap. Remove another contact first.`
-            : isSelected ? 'Remove from shortlist' : 'Add to shortlist'
-        }>
-          <button
-            onClick={handleSelect}
-            disabled={saving || atCap}
-            className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-colors text-xs font-bold
-              ${isSelected
-                ? 'bg-blue-600 border-blue-600 text-white hover:bg-blue-700'
-                : atCap
-                  ? 'border-gray-200 text-gray-300 cursor-not-allowed'
-                  : 'border-gray-300 text-gray-400 hover:border-blue-400 hover:text-blue-500'}`}
-          >
-            {saving ? '…' : isSelected ? '✓' : '+'}
-          </button>
-        </Tooltip>
-      </td>
+    <tr className={`border-b transition-colors
+      ${isSelected
+        ? 'border-blue-100 bg-blue-50 hover:bg-blue-100'
+        : 'border-gray-100 hover:bg-gray-50'}`}>
 
       {/* Name / Title */}
       <td className="px-4 py-3">
@@ -74,20 +55,29 @@ function AvailableContactRow({ contact, onToggle, selectedCount, maxContacts }) 
         </span>
       </td>
 
-      {/* Email */}
-      <td className="px-4 py-3 text-sm text-gray-600">
+      {/* Email icon */}
+      <td className="px-4 py-3 text-center">
         {contact.email
-          ? <a href={`mailto:${contact.email}`} className="hover:text-blue-600 truncate block max-w-xs"
-               onClick={e => e.stopPropagation()}>{contact.email}</a>
-          : <span className="text-gray-300">No email</span>}
+          ? <Tooltip text={contact.email}>
+              <a href={`mailto:${contact.email}`} onClick={e => e.stopPropagation()}
+                 className="inline-flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
+                <img src="/email.webp" alt="Email" className="w-5 h-5 object-contain" />
+              </a>
+            </Tooltip>
+          : <span className="text-gray-200">—</span>}
       </td>
 
-      {/* LinkedIn */}
-      <td className="px-4 py-3 text-sm">
+      {/* LinkedIn icon */}
+      <td className="px-4 py-3 text-center">
         {contact.linkedin_url
-          ? <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer"
-               className="text-blue-600 hover:underline" onClick={e => e.stopPropagation()}>LinkedIn</a>
-          : <span className="text-gray-300">—</span>}
+          ? <Tooltip text="View LinkedIn profile">
+              <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer"
+                 onClick={e => e.stopPropagation()}
+                 className="inline-flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
+                <img src="/linkedin.webp" alt="LinkedIn" className="w-5 h-5 object-contain" />
+              </a>
+            </Tooltip>
+          : <span className="text-gray-200">—</span>}
       </td>
 
       {/* Score */}
@@ -101,6 +91,32 @@ function AvailableContactRow({ contact, onToggle, selectedCount, maxContacts }) 
             </span>
           </Tooltip>
         ) : <span className="text-gray-300 text-sm">—</span>}
+      </td>
+
+      {/* Shortlist action */}
+      <td className="px-4 py-3 text-right">
+        {isSelected ? (
+          <button
+            onClick={handleSelect}
+            disabled={saving}
+            className="text-xs px-3 py-1.5 rounded border border-blue-300 bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            {saving ? '…' : '✓ Shortlisted'}
+          </button>
+        ) : (
+          <Tooltip text={atCap ? `Cap of ${maxContacts} reached — remove another first.` : 'Add to shortlist'}>
+            <button
+              onClick={handleSelect}
+              disabled={saving || atCap}
+              className={`text-xs px-3 py-1.5 rounded border font-medium transition-colors disabled:opacity-40 whitespace-nowrap
+                ${atCap
+                  ? 'border-gray-200 text-gray-300 cursor-not-allowed'
+                  : 'border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50'}`}
+            >
+              {saving ? '…' : '+ Shortlist'}
+            </button>
+          </Tooltip>
+        )}
       </td>
     </tr>
   )
@@ -143,81 +159,6 @@ function PendingContactRow({ contact, onStatusChange }) {
   )
 }
 
-// ── Outreach form ──────────────────────────────────────────────────────────────
-function OutreachForm({ firmId, contacts, onAdded }) {
-  const [form, setForm] = useState({
-    lp_contact_id: '', outreach_date: new Date().toISOString().slice(0, 10),
-    outreach_type: 'email', notes: '', logged_by: '',
-  })
-  const [saving, setSaving] = useState(false)
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      await createOutreach({ ...form, lp_firm_id: firmId, lp_contact_id: form.lp_contact_id || null })
-      setForm(f => ({ ...f, notes: '', lp_contact_id: '' }))
-      onAdded()
-    } catch (err) {
-      alert('Error: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const selected = contacts.filter(c => c.is_selected === 1)
-  return (
-    <form onSubmit={handleSubmit} className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
-        <input type="date" value={form.outreach_date}
-          onChange={e => setForm(f => ({ ...f, outreach_date: e.target.value }))}
-          className="input text-sm" required />
-      </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
-        <select value={form.outreach_type}
-          onChange={e => setForm(f => ({ ...f, outreach_type: e.target.value }))}
-          className="select w-full text-sm">
-          <option value="email">Email</option>
-          <option value="call">Call</option>
-          <option value="meeting">Meeting</option>
-          <option value="event">Event</option>
-        </select>
-      </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Contact (optional)</label>
-        <select value={form.lp_contact_id}
-          onChange={e => setForm(f => ({ ...f, lp_contact_id: e.target.value }))}
-          className="select w-full text-sm">
-          <option value="">Firm-level</option>
-          {selected.map(c => (
-            <option key={c.id} value={c.id}>
-              {[c.first_name, c.last_name].filter(Boolean).join(' ')}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="col-span-2">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
-        <input type="text" value={form.notes}
-          onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-          placeholder="Brief notes on this outreach…" className="input text-sm" />
-      </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Logged by</label>
-        <input type="text" value={form.logged_by}
-          onChange={e => setForm(f => ({ ...f, logged_by: e.target.value }))}
-          placeholder="Your name" className="input text-sm" />
-      </div>
-      <div className="col-span-full flex justify-end">
-        <button type="submit" disabled={saving} className="btn-primary text-sm">
-          {saving ? 'Saving…' : 'Log outreach'}
-        </button>
-      </div>
-    </form>
-  )
-}
 
 // ── Main FirmDetail page ───────────────────────────────────────────────────────
 export default function FirmDetail() {
@@ -226,27 +167,29 @@ export default function FirmDetail() {
 
   const [firm, setFirm]         = useState(null)
   const [contacts, setContacts] = useState([])
-  const [outreach, setOutreach] = useState([])
   const [tab, setTab]           = useState('available')
   const [loading, setLoading]   = useState(true)
   const [statusSaving, setStatusSaving] = useState(false)
-  const [showOutreachForm, setShowOutreachForm] = useState(false)
   const [maxContacts, setMaxContacts] = useState(5)
 
-  // Filters for Available tab
+  // Filters / sort for Available tab
   const [titleFilter, setTitleFilter] = useState('')
   const [sortField, setSortField]     = useState('score')
+  const [sortDir, setSortDir]         = useState('desc')
+
+  function toggleSort(field) {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortField(field); setSortDir(field === 'score' ? 'desc' : 'asc') }
+  }
 
   useEffect(() => {
     Promise.all([
       getFirm(id),
       getFirmContacts(id),
-      getOutreach({ firm_id: id }),
       getSettings(),
-    ]).then(([f, c, o, s]) => {
+    ]).then(([f, c, s]) => {
       setFirm(f)
       setContacts(c)
-      setOutreach(o.entries || [])
       if (s.max_contacts_per_firm) setMaxContacts(parseInt(s.max_contacts_per_firm, 10))
     }).catch(err => {
       if (err.message.includes('404')) navigate('/firms')
@@ -262,25 +205,37 @@ export default function FirmDetail() {
     contacts.filter(c => c.filter_status === 'pending_review'),
     [contacts])
 
-  // Apply title filter + sort to Available tab
-  const filteredAvailable = useMemo(() => {
+  // Sort helper for Available tab
+  function sortContacts(list, field, dir) {
+    return [...list].sort((a, b) => {
+      let av, bv
+      if (field === 'score')  { av = a.filter_score ?? -1; bv = b.filter_score ?? -1 }
+      else if (field === 'name') { av = (a.last_name || '').toLowerCase(); bv = (b.last_name || '').toLowerCase() }
+      else if (field === 'source') { av = a.source; bv = b.source }
+      else return 0
+      if (av < bv) return dir === 'asc' ? -1 : 1
+      if (av > bv) return dir === 'asc' ? 1 : -1
+      return 0
+    })
+  }
+
+  // Apply title filter + sort to Available tab — selected always floated to top
+  const { filteredSelected, filteredUnselected } = useMemo(() => {
     let list = availableContacts
     if (titleFilter.trim()) {
       const q = titleFilter.toLowerCase()
       list = list.filter(c => (c.job_title || '').toLowerCase().includes(q) ||
                                (c.first_name + ' ' + c.last_name).toLowerCase().includes(q))
     }
-    if (sortField === 'score') {
-      list = [...list].sort((a, b) => (b.filter_score ?? 0) - (a.filter_score ?? 0))
-    } else if (sortField === 'name') {
-      list = [...list].sort((a, b) =>
-        (a.last_name || '').localeCompare(b.last_name || ''))
-    } else if (sortField === 'source_dynamo') {
-      list = [...list].sort((a, b) =>
-        a.source === 'dynamo' ? -1 : b.source === 'dynamo' ? 1 : 0)
-    }
-    return list
-  }, [availableContacts, titleFilter, sortField])
+    const sel   = sortContacts(list.filter(c => c.is_selected === 1), sortField, sortDir)
+    const unsel = sortContacts(list.filter(c => c.is_selected !== 1), sortField, sortDir)
+    return { filteredSelected: sel, filteredUnselected: unsel }
+  }, [availableContacts, titleFilter, sortField, sortDir])
+
+  const filteredAvailable = useMemo(
+    () => [...filteredSelected, ...filteredUnselected],
+    [filteredSelected, filteredUnselected]
+  )
 
   const selectedCount = useMemo(() =>
     contacts.filter(c => c.is_selected === 1).length, [contacts])
@@ -321,11 +276,6 @@ export default function FirmDetail() {
     } finally {
       setStatusSaving(false)
     }
-  }
-
-  async function refreshOutreach() {
-    const data = await getOutreach({ firm_id: id })
-    setOutreach(data.entries || [])
   }
 
   if (loading) return <div className="text-center py-20 text-gray-400">Loading…</div>
@@ -455,7 +405,7 @@ export default function FirmDetail() {
         {/* Available tab content */}
         {tab === 'available' && (
           <>
-            {/* Filter + sort bar */}
+            {/* Filter bar */}
             <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-3 bg-gray-50">
               <input
                 type="search"
@@ -464,23 +414,11 @@ export default function FirmDetail() {
                 onChange={e => setTitleFilter(e.target.value)}
                 className="input text-sm py-1.5 flex-1 max-w-64"
               />
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span className="text-xs">Sort:</span>
-                {[
-                  { value: 'score',        label: 'Score ↓' },
-                  { value: 'name',         label: 'Name A-Z' },
-                  { value: 'source_dynamo', label: 'Dynamo first' },
-                ].map(opt => (
-                  <button key={opt.value}
-                    onClick={() => setSortField(opt.value)}
-                    className={`text-xs px-2 py-1 rounded border transition-colors
-                      ${sortField === opt.value
-                        ? 'border-blue-400 bg-blue-50 text-blue-700'
-                        : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+              {filteredSelected.length > 0 && (
+                <span className="text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 px-2 py-1 rounded">
+                  {filteredSelected.length} shortlisted
+                </span>
+              )}
               <span className="text-xs text-gray-400 ml-auto">
                 {filteredAvailable.length} of {availableContacts.length} shown
               </span>
@@ -489,17 +427,36 @@ export default function FirmDetail() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-white border-b border-gray-100">
-                    <th className="px-4 py-2 w-10"></th>
-                    <th className="px-4 py-2 text-left font-medium text-gray-600">Name / Title</th>
-                    <th className="px-4 py-2 text-left font-medium text-gray-600">Source</th>
-                    <th className="px-4 py-2 text-left font-medium text-gray-600">Email</th>
-                    <th className="px-4 py-2 text-left font-medium text-gray-600">LinkedIn</th>
-                    <th className="px-4 py-2 text-center font-medium text-gray-600">
+                  <tr className="bg-white border-b border-gray-200">
+                    <th className="px-4 py-2 text-left">
+                      <button onClick={() => toggleSort('name')}
+                        className={`flex items-center gap-1 font-medium text-xs uppercase tracking-wide
+                          ${sortField === 'name' ? 'text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                        Name / Title
+                        <span className="text-gray-400">{sortField === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+                      </button>
+                    </th>
+                    <th className="px-4 py-2 text-left">
+                      <button onClick={() => toggleSort('source')}
+                        className={`flex items-center gap-1 font-medium text-xs uppercase tracking-wide
+                          ${sortField === 'source' ? 'text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                        Source
+                        <span className="text-gray-400">{sortField === 'source' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+                      </button>
+                    </th>
+                    <th className="px-4 py-2 text-center font-medium text-xs uppercase tracking-wide text-gray-500 w-10">Email</th>
+                    <th className="px-4 py-2 text-center font-medium text-xs uppercase tracking-wide text-gray-500 w-10">LinkedIn</th>
+                    <th className="px-4 py-2 text-center">
                       <Tooltip text="Advisory score (0–100) based on seniority and role match. Never auto-selects.">
-                        <span className="cursor-default">Score</span>
+                        <button onClick={() => toggleSort('score')}
+                          className={`flex items-center gap-1 font-medium text-xs uppercase tracking-wide mx-auto
+                            ${sortField === 'score' ? 'text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                          Score
+                          <span className="text-gray-400">{sortField === 'score' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+                        </button>
                       </Tooltip>
                     </th>
+                    <th className="px-4 py-2 w-28"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -511,15 +468,45 @@ export default function FirmDetail() {
                           : 'No contacts match your filter.'}
                       </td>
                     </tr>
-                  ) : filteredAvailable.map(c => (
-                    <AvailableContactRow
-                      key={c.id}
-                      contact={c}
-                      onToggle={handleToggle}
-                      selectedCount={selectedCount}
-                      maxContacts={maxContacts}
-                    />
-                  ))}
+                  ) : (
+                    <>
+                      {/* Selected contacts — pinned to top */}
+                      {filteredSelected.length > 0 && (
+                        <>
+                          <tr>
+                            <td colSpan={6} className="px-4 py-1.5 bg-blue-50 border-b border-blue-100">
+                              <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+                                Shortlisted · {filteredSelected.length}
+                              </span>
+                            </td>
+                          </tr>
+                          {filteredSelected.map(c => (
+                            <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
+                              selectedCount={selectedCount} maxContacts={maxContacts} />
+                          ))}
+                        </>
+                      )}
+
+                      {/* Unselected contacts */}
+                      {filteredUnselected.length > 0 && (
+                        <>
+                          {filteredSelected.length > 0 && (
+                            <tr>
+                              <td colSpan={6} className="px-4 py-1.5 bg-gray-50 border-b border-gray-100">
+                                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                                  Available · {filteredUnselected.length}
+                                </span>
+                              </td>
+                            </tr>
+                          )}
+                          {filteredUnselected.map(c => (
+                            <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
+                              selectedCount={selectedCount} maxContacts={maxContacts} />
+                          ))}
+                        </>
+                      )}
+                    </>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -558,59 +545,6 @@ export default function FirmDetail() {
         )}
       </div>
 
-      {/* Outreach log */}
-      <div className="bg-white border border-gray-200 rounded-lg p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-gray-900">Outreach Log ({outreach.length})</h2>
-          <button
-            onClick={() => setShowOutreachForm(f => !f)}
-            className="btn-secondary text-sm py-1.5"
-          >
-            {showOutreachForm ? 'Cancel' : '+ Log outreach'}
-          </button>
-        </div>
-
-        {showOutreachForm && (
-          <div className="mb-4 pb-4 border-b border-gray-100">
-            <OutreachForm
-              firmId={id}
-              contacts={contacts}
-              onAdded={() => { setShowOutreachForm(false); refreshOutreach() }}
-            />
-          </div>
-        )}
-
-        {outreach.length === 0 ? (
-          <p className="text-sm text-gray-400">No outreach logged yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {outreach.map(entry => (
-              <div key={entry.id}
-                className="flex items-start justify-between text-sm py-2 border-b border-gray-50 last:border-0">
-                <div className="flex items-start gap-3">
-                  <span className="text-gray-400 text-xs whitespace-nowrap mt-0.5">{entry.outreach_date}</span>
-                  <div>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 mr-2">
-                      {entry.outreach_type}
-                    </span>
-                    {entry.contact_name && <span className="text-gray-700 font-medium mr-2">{entry.contact_name}</span>}
-                    {entry.notes && <span className="text-gray-600">{entry.notes}</span>}
-                    {entry.logged_by && <span className="text-gray-400 ml-2 text-xs">— {entry.logged_by}</span>}
-                  </div>
-                </div>
-                <button
-                  onClick={async () => {
-                    if (!confirm('Delete this outreach entry?')) return
-                    await deleteOutreach(entry.id)
-                    setOutreach(os => os.filter(o => o.id !== entry.id))
-                  }}
-                  className="text-gray-300 hover:text-red-500 transition-colors text-xs ml-4 flex-shrink-0"
-                >✕</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   )
 }

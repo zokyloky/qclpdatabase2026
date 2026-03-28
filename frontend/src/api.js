@@ -97,6 +97,9 @@ export function getOutreach(params = {}) {
 export function createOutreach(entry) { return post('/outreach', entry) }
 export function deleteOutreach(id)    { return del(`/outreach/${id}`) }
 
+// ── Selected Contacts ────────────────────────────────────────────────────────
+export function getSelectedContacts() { return get('/contacts/selected') }
+
 // ── Export ────────────────────────────────────────────────────────────────────
 export async function exportContacts() {
   const blob = await get('/export/contacts')

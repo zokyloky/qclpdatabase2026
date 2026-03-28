@@ -296,14 +296,12 @@ export default function FirmList() {
                   <SortableHeader label="Location" col="country" current={sortBy} dir={sortDir} onSort={toggleSort} />
                 </th>
                 <th className="px-4 py-2.5 text-left">
-                  <Tooltip text="Contacts shortlisted vs. available. The cap is advisory — not enforced.">
-                    <span className="font-medium text-xs uppercase tracking-wide text-gray-500 cursor-default">Contacts</span>
-                  </Tooltip>
+                  <SortableHeader label="Contacts" col="selected_count" current={sortBy} dir={sortDir} onSort={toggleSort}
+                    tooltip="Sort by number of shortlisted contacts." />
                 </th>
                 <th className="px-4 py-2.5 text-left">
-                  <Tooltip text="Where this firm sits in your review workflow.">
-                    <span className="font-medium text-xs uppercase tracking-wide text-gray-500 cursor-default">Status</span>
-                  </Tooltip>
+                  <SortableHeader label="Status" col="workflow_status" current={sortBy} dir={sortDir} onSort={toggleSort}
+                    tooltip="Sort by workflow status." />
                 </th>
                 <th className="px-4 py-2.5 w-24"></th>
               </tr>

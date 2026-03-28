@@ -171,6 +171,7 @@ def list_firms(
         "last_outreach":     "os.last_outreach_date",
         "institution_type":  "f.institution_type",
         "country":           "f.country",
+        "workflow_status":   "f.workflow_status",
     }
     sort_col = sort_col_map.get(sort_by, WORKFLOW_SORT_PRIORITY)
     sort_dir_sql = "DESC" if sort_dir.lower() == "desc" else "ASC"
@@ -498,6 +499,36 @@ def export_selected_contacts(db=Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/api/contacts/selected", dependencies=[Depends(verify_token)])
+def get_selected_contacts(db=Depends(get_db)):
+    """Return all is_selected=1 contacts as JSON (for the Selected Contacts page)."""
+    with dict_cursor(db) as cur:
+        cur.execute(
+            """
+            SELECT
+                c.id,
+                c.lp_firm_id,
+                f.display_name  AS firm_name,
+                f.institution_type,
+                f.country,
+                c.first_name,
+                c.last_name,
+                c.job_title,
+                c.email,
+                c.linkedin_url,
+                c.filter_score,
+                c.role_tags,
+                c.source        AS contact_source
+            FROM lp_contacts c
+            JOIN lp_firms f ON f.id = c.lp_firm_id
+            WHERE c.is_selected = 1 AND c.is_active = 1 AND f.is_active = 1
+            ORDER BY f.display_name, COALESCE(c.filter_score, 0) DESC
+            """
+        )
+        rows = cur.fetchall()
+    return [dict(r) for r in rows]
 
 
 # ── Filter config helpers (for sync) ─────────────────────────────────────────

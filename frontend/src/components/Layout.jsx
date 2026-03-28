@@ -2,10 +2,10 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { logout } from '../api'
 
 const navItems = [
-  { to: '/firms',    label: 'LP Firms',       icon: '🏢' },
-  { to: '/review',   label: 'Review Queue',   icon: '📋' },
-  { to: '/outreach', label: 'Outreach Log',   icon: '📞' },
-  { to: '/sync',     label: 'Sync',           icon: '🔄' },
+  { to: '/firms',    label: 'LP Firms',          icon: '🏢' },
+  { to: '/review',   label: 'Review Queue',      icon: '📋' },
+  { to: '/selected', label: 'Selected Contacts', icon: '✅' },
+  { to: '/sync',     label: 'Sync',              icon: '🔄' },
 ]
 
 export default function Layout() {
