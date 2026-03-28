@@ -299,58 +299,10 @@ def get_firm_contacts(firm_id: str, db=Depends(get_db)):
     return contacts
 
 
-# ── Update a contact ──────────────────────────────────────────────────────────
-class ContactUpdate(BaseModel):
-    is_selected:   Optional[int]  = None
-    filter_status: Optional[str]  = None
-
-
-@app.patch("/api/contacts/{contact_id}", dependencies=[Depends(verify_token)])
-def update_contact(contact_id: str, update: ContactUpdate, db=Depends(get_db)):
-    fields, params = [], []
-    now = datetime.now(timezone.utc).isoformat()
-
-    if update.is_selected is not None:
-        fields.append("is_selected = %s")
-        params.append(update.is_selected)
-
-    if update.filter_status is not None:
-        allowed = ("approved", "blacklisted", "pending_review", "dynamo")
-        if update.filter_status not in allowed:
-            raise HTTPException(400, f"filter_status must be one of {allowed}")
-        fields.append("filter_status = %s")
-        params.append(update.filter_status)
-
-    if not fields:
-        raise HTTPException(400, "Nothing to update")
-
-    fields.append("updated_at = %s")
-    params.append(now)
-    params.append(contact_id)
-
-    sql = f"UPDATE lp_contacts SET {', '.join(fields)} WHERE id = %s RETURNING id, lp_firm_id"
-    with dict_cursor(db) as cur:
-        cur.execute(sql, params)
-        row = cur.fetchone()
-        if not row:
-            raise HTTPException(404, "Contact not found")
-
-        # Auto-advance firm to in_progress when user makes their first selection
-        if update.is_selected == 1:
-            cur.execute(
-                """
-                UPDATE lp_firms
-                SET workflow_status = 'in_progress', updated_at = %s
-                WHERE id = %s AND workflow_status = 'unreviewed'
-                """,
-                (now, row["lp_firm_id"]),
-            )
-
-        db.commit()
-    return {"id": contact_id, "updated": True}
-
-
 # ── Bulk contact update ────────────────────────────────────────────────────────
+# NOTE: This MUST be registered before PATCH /api/contacts/{contact_id} so that
+# FastAPI (which matches routes in registration order) does not swallow
+# /bulk-update as a contact_id value.
 class BulkContactUpdate(BaseModel):
     contact_ids:   List[str]
     is_selected:   Optional[int] = None
@@ -406,6 +358,57 @@ def bulk_update_contacts(update: BulkContactUpdate, db=Depends(get_db)):
 
         db.commit()
     return {"updated": len(rows), "ids": [r["id"] for r in rows]}
+
+
+# ── Update a single contact ────────────────────────────────────────────────────
+class ContactUpdate(BaseModel):
+    is_selected:   Optional[int]  = None
+    filter_status: Optional[str]  = None
+
+
+@app.patch("/api/contacts/{contact_id}", dependencies=[Depends(verify_token)])
+def update_contact(contact_id: str, update: ContactUpdate, db=Depends(get_db)):
+    fields, params = [], []
+    now = datetime.now(timezone.utc).isoformat()
+
+    if update.is_selected is not None:
+        fields.append("is_selected = %s")
+        params.append(update.is_selected)
+
+    if update.filter_status is not None:
+        allowed = ("approved", "blacklisted", "pending_review", "dynamo")
+        if update.filter_status not in allowed:
+            raise HTTPException(400, f"filter_status must be one of {allowed}")
+        fields.append("filter_status = %s")
+        params.append(update.filter_status)
+
+    if not fields:
+        raise HTTPException(400, "Nothing to update")
+
+    fields.append("updated_at = %s")
+    params.append(now)
+    params.append(contact_id)
+
+    sql = f"UPDATE lp_contacts SET {', '.join(fields)} WHERE id = %s RETURNING id, lp_firm_id"
+    with dict_cursor(db) as cur:
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Contact not found")
+
+        # Auto-advance firm to in_progress when user makes their first selection
+        if update.is_selected == 1:
+            cur.execute(
+                """
+                UPDATE lp_firms
+                SET workflow_status = 'in_progress', updated_at = %s
+                WHERE id = %s AND workflow_status = 'unreviewed'
+                """,
+                (now, row["lp_firm_id"]),
+            )
+
+        db.commit()
+    return {"id": contact_id, "updated": True}
 
 
 # ── Admin: auto-complete Dynamo-only firms ─────────────────────────────────────
@@ -566,7 +569,13 @@ def delete_outreach(entry_id: str, db=Depends(get_db)):
 # ── Export ────────────────────────────────────────────────────────────────────
 @app.get("/api/export/contacts", dependencies=[Depends(verify_token)])
 def export_selected_contacts(db=Depends(get_db)):
-    """Download all is_selected=1 contacts as CSV in Dynamo-compatible format."""
+    """Download shortlisted contacts as CSV in Dynamo-compatible format.
+
+    Includes both:
+      - Preqin contacts manually shortlisted (is_selected = 1)
+      - Dynamo contacts, which are blanket-accepted (filter_status = 'dynamo')
+    A 'Source' column is appended so the origin of each contact is clear.
+    """
     with dict_cursor(db) as cur:
         cur.execute(
             """
@@ -585,11 +594,13 @@ def export_selected_contacts(db=Depends(get_db)):
                 f.dynamo_internal_id    AS "Internal ID",
                 f.preqin_firm_id        AS "Preqin Firm ID",
                 c.linkedin_url          AS "LinkedIn URL",
-                c.job_title             AS "Job Title"
+                c.job_title             AS "Job Title",
+                CASE WHEN c.source = 'dynamo' THEN 'Dynamo' ELSE 'Preqin' END AS "Source"
             FROM lp_contacts c
             JOIN lp_firms f ON f.id = c.lp_firm_id
-            WHERE c.is_selected = 1 AND c.is_active = 1 AND f.is_active = 1
-            ORDER BY f.display_name, c.last_name, c.first_name
+            WHERE (c.is_selected = 1 OR c.filter_status = 'dynamo')
+              AND c.is_active = 1 AND f.is_active = 1
+            ORDER BY f.display_name, c.source DESC, c.last_name, c.first_name
             """
         )
         rows = cur.fetchall()
@@ -614,6 +625,7 @@ def export_selected_contacts(db=Depends(get_db)):
         "Preqin Firm ID",
         "LinkedIn URL",
         "Job Title",
+        "Source",
     ]
 
     output = io.StringIO()
@@ -633,7 +645,12 @@ def export_selected_contacts(db=Depends(get_db)):
 
 @app.get("/api/contacts/selected", dependencies=[Depends(verify_token)])
 def get_selected_contacts(db=Depends(get_db)):
-    """Return all is_selected=1 contacts as JSON (for the Selected Contacts page)."""
+    """Return all shortlisted contacts as JSON (for the Selected Contacts page).
+
+    Includes both:
+      - Preqin contacts manually shortlisted (is_selected = 1)
+      - Dynamo contacts, which are blanket-accepted (filter_status = 'dynamo')
+    """
     with dict_cursor(db) as cur:
         cur.execute(
             """
@@ -650,11 +667,12 @@ def get_selected_contacts(db=Depends(get_db)):
                 c.linkedin_url,
                 c.filter_score,
                 c.role_tags,
-                c.source        AS contact_source
+                c.source
             FROM lp_contacts c
             JOIN lp_firms f ON f.id = c.lp_firm_id
-            WHERE c.is_selected = 1 AND c.is_active = 1 AND f.is_active = 1
-            ORDER BY f.display_name, COALESCE(c.filter_score, 0) DESC
+            WHERE (c.is_selected = 1 OR c.filter_status = 'dynamo')
+              AND c.is_active = 1 AND f.is_active = 1
+            ORDER BY f.display_name, c.source DESC, COALESCE(c.filter_score, 0) DESC
             """
         )
         rows = cur.fetchall()

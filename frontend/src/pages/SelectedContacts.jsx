@@ -191,7 +191,9 @@ export default function SelectedContacts() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-qgray-50 border-b border-qgray-200">
-                <th className="px-4 py-3 text-left"><SortHeader label="Firm" field="firm" /></th>
+                <th className="px-4 py-3 text-left w-24">
+                  <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Source</span>
+                </th>
                 <th className="px-4 py-3 text-left"><SortHeader label="Name" field="name" /></th>
                 <th className="px-4 py-3 text-left"><SortHeader label="Title" field="title" /></th>
                 <th className="px-4 py-3 text-center w-12">
@@ -240,8 +242,14 @@ export default function SelectedContacts() {
                     return (
                       <tr key={c.id} className="border-b border-qgray-50 hover:bg-qgray-50 transition-colors">
                         <td className="px-4 py-2.5">
-                          {isDynamo && (
-                            <span className="inline-flex px-1.5 py-0.5 rounded text-2xs font-medium bg-purple-50 text-purple-700 border border-purple-100">D</span>
+                          {isDynamo ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap">
+                              Dynamo
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap">
+                              Preqin
+                            </span>
                           )}
                         </td>
                         <td className="px-4 py-2.5">
