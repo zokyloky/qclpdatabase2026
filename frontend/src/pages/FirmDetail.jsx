@@ -4,6 +4,7 @@ import {
   getFirm, getFirmContacts, getFirms, updateContact, updateFirmStatus, getSettings, getStats,
 } from '../api'
 import StatusBadge from '../components/StatusBadge'
+import Breadcrumb from '../components/Breadcrumb'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 // Ensure a URL has a proper protocol prefix so it doesn't resolve relative to the app
@@ -252,9 +253,37 @@ export default function FirmDetail() {
   // Overall progress stats (fetched once on mount)
   const [stats, setStats] = useState(null)
 
+  // Pre-fetch the next firm to review in the background so "Done" is instant
+  const [nextFirm, setNextFirm] = useState(null)
+  const [transitioning, setTransitioning] = useState(false)
+
   useEffect(() => {
     getStats().then(setStats).catch(console.error)
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function prefetchNext() {
+      const statusPriority = ['needs_attention', 'in_progress', 'unreviewed']
+      for (const status of statusPriority) {
+        if (cancelled) return
+        try {
+          const { firms: candidates } = await getFirms({
+            workflow_status: status,
+            per_page: 10,
+            sort_by: 'workflow_priority',
+            sort_dir: 'asc',
+          })
+          const next = candidates.find(
+            f => String(f.id) !== String(id) && (f.available_count > 0 || f.pending_count > 0)
+          )
+          if (next) { if (!cancelled) setNextFirm(next); return }
+        } catch { /* continue */ }
+      }
+    }
+    prefetchNext()
+    return () => { cancelled = true }
+  }, [id])
 
   function toggleSort(field) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -358,33 +387,41 @@ export default function FirmDetail() {
 
   async function handleMarkComplete() {
     setStatusSaving(true)
+    setTransitioning(false)
     try {
       await updateFirmStatus(id, 'complete')
       setFirm(f => ({ ...f, workflow_status: 'complete', review_reason: null }))
 
-      // Auto-advance: find the next firm to review, in priority order
-      const statusPriority = ['needs_attention', 'in_progress', 'unreviewed']
-      let navigated = false
-      for (const status of statusPriority) {
-        if (navigated) break
-        try {
-          const { firms: candidates } = await getFirms({
-            workflow_status: status,
-            per_page: 10,
-            sort_by: 'workflow_priority',
-            sort_dir: 'asc',
-          })
-          const next = candidates.find(
-            f => String(f.id) !== String(id) && (f.available_count > 0 || f.pending_count > 0)
-          )
-          if (next) { navigate(`/firms/${next.id}`); navigated = true }
-        } catch { /* continue trying next priority */ }
+      // Brief success flash before navigating
+      setTransitioning(true)
+      await new Promise(r => setTimeout(r, 600))
+
+      // Use pre-fetched next firm if available, otherwise fall back to searching
+      if (nextFirm) {
+        navigate(`/firms/${nextFirm.id}`)
+      } else {
+        // Fallback: search for next firm now
+        const statusPriority = ['needs_attention', 'in_progress', 'unreviewed']
+        let navigated = false
+        for (const status of statusPriority) {
+          if (navigated) break
+          try {
+            const { firms: candidates } = await getFirms({
+              workflow_status: status, per_page: 10,
+              sort_by: 'workflow_priority', sort_dir: 'asc',
+            })
+            const next = candidates.find(
+              f => String(f.id) !== String(id) && (f.available_count > 0 || f.pending_count > 0)
+            )
+            if (next) { navigate(`/firms/${next.id}`); navigated = true }
+          } catch { /* continue */ }
+        }
+        if (!navigated) navigate('/firms')
       }
-      if (!navigated) navigate('/firms')
     } catch (e) {
       alert('Error: ' + e.message)
-    } finally {
       setStatusSaving(false)
+      setTransitioning(false)
     }
   }
 
@@ -423,23 +460,38 @@ export default function FirmDetail() {
   return (
     <div className="space-y-5 w-full">
 
-      {/* Full-page loading overlay — visible while saving & navigating to the next firm */}
+      {/* Full-page overlay — visible while saving & transitioning to the next firm */}
       {statusSaving && (
-        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-white/90 backdrop-blur-sm z-50 flex items-center justify-center transition-opacity duration-300">
           <div className="text-center">
-            <div className="w-12 h-12 border-4 border-qgreen-200 border-t-qgreen-700 rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-qgreen-800 font-semibold text-lg">Saving &amp; loading next firm…</p>
-            <p className="text-qgray-500 text-sm mt-1">This will only take a moment.</p>
+            {transitioning ? (
+              <>
+                <div className="w-14 h-14 rounded-full bg-qgreen-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
+                  <span className="text-white text-2xl font-bold">✓</span>
+                </div>
+                <p className="text-qgreen-800 font-semibold text-lg">Firm complete!</p>
+                {nextFirm && (
+                  <p className="text-qgray-500 text-sm mt-1">
+                    Moving to <span className="font-medium text-qgray-700">{nextFirm.display_name || nextFirm.lp_name}</span>…
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="w-12 h-12 border-4 border-qgreen-200 border-t-qgreen-700 rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-qgreen-800 font-semibold text-lg">Saving…</p>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* Back + progress strip */}
+      {/* Breadcrumb + progress strip */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <button onClick={() => navigate('/firms')}
-          className="text-sm text-qgray-500 hover:text-qgreen-700 flex items-center gap-1 font-medium transition-colors flex-shrink-0">
-          ← Back to firms
-        </button>
+        <Breadcrumb items={[
+          { label: 'LP Firms', to: '/firms' },
+          { label: firm.display_name || firm.lp_name },
+        ]} />
 
         {/* Overall progress tracker */}
         {pctComplete !== null && (
@@ -537,7 +589,7 @@ export default function FirmDetail() {
           </div>
 
           {/* Shortlist counter + action */}
-          <div className="flex items-center gap-5 flex-shrink-0">
+          <div className="flex items-center gap-5 flex-shrink-0 flex-col sm:flex-row items-end sm:items-center">
             {/* Counter — shows both dynamo and capped counts */}
             <div className="text-right">
               <Tooltip text={`${nonDynamoSelectedCount} manually shortlisted of ${maxContacts} cap · ${dynamoSelectedCount} Dynamo auto-accepted (not capped)`}>
@@ -565,13 +617,20 @@ export default function FirmDetail() {
                 {statusSaving ? 'Saving…' : 'Reopen'}
               </button>
             ) : (
-              <button
-                onClick={handleMarkComplete}
-                disabled={statusSaving}
-                className="btn-primary"
-              >
-                {statusSaving ? 'Saving…' : '✓ Done — Next Firm →'}
-              </button>
+              <div className="flex flex-col items-end gap-1">
+                <button
+                  onClick={handleMarkComplete}
+                  disabled={statusSaving}
+                  className="btn-primary"
+                >
+                  {statusSaving ? 'Saving…' : '✓ Done'}
+                </button>
+                {nextFirm && !statusSaving && (
+                  <span className="text-2xs text-qgray-400 whitespace-nowrap">
+                    Next: <span className="text-qgray-600 font-medium">{nextFirm.display_name || nextFirm.lp_name}</span>
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getPendingReview, updateContact } from '../api'
+import Breadcrumb from '../components/Breadcrumb'
 
 // Normalise a URL so it has a proper protocol prefix
 function normalizeUrl(url) {
@@ -69,6 +70,7 @@ export default function ReviewQueue() {
 
   return (
     <div className="space-y-4 w-full">
+      <Breadcrumb items={[{ label: 'Review Queue' }]} />
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-display font-bold text-3xl text-qgray-900 tracking-tight">Review Queue</h1>
@@ -186,22 +188,22 @@ export default function ReviewQueue() {
                         <button
                           onClick={() => handleAction(c.id, 'approved')}
                           disabled={!!isSaving}
-                          className={`text-xs px-3 py-1.5 rounded font-medium transition-all disabled:opacity-50 whitespace-nowrap
+                          className={`text-xs w-20 py-1.5 rounded font-medium transition-all disabled:opacity-50 whitespace-nowrap text-center
                             ${isSaving === 'approved'
                               ? 'bg-green-600 text-white scale-95'
                               : 'bg-qteal-600 hover:bg-qteal-700 text-white'}`}
                         >
-                          {isSaving === 'approved' ? '✓ Approving…' : 'Approve'}
+                          {isSaving === 'approved' ? '✓ Done' : 'Approve'}
                         </button>
                         <button
                           onClick={() => handleAction(c.id, 'blacklisted')}
                           disabled={!!isSaving}
-                          className={`text-xs px-3 py-1.5 rounded transition-all disabled:opacity-50 whitespace-nowrap
+                          className={`text-xs w-16 py-1.5 rounded transition-all disabled:opacity-50 whitespace-nowrap text-center
                             ${isSaving === 'blacklisted'
                               ? 'bg-red-100 text-red-800 border border-red-300 scale-95'
                               : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200'}`}
                         >
-                          {isSaving === 'blacklisted' ? '✕ Rejecting…' : 'Reject'}
+                          Reject
                         </button>
                       </div>
                     </td>

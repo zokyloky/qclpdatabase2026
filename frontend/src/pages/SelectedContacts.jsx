@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getSelectedContacts, exportContacts } from '../api'
+import { getSelectedContacts, exportContacts, updateContact } from '../api'
+import Breadcrumb from '../components/Breadcrumb'
 
 function useDebounce(value, delay = 300) {
   const [debounced, setDebounced] = useState(value)
@@ -103,6 +104,18 @@ export default function SelectedContacts() {
     finally { setExporting(false) }
   }
 
+  // Optimistically remove a contact from the shortlist and sync to the server
+  async function handleRemove(contactId) {
+    setContacts(cs => cs.filter(c => c.id !== contactId))
+    try {
+      await updateContact(contactId, { is_selected: 0 })
+    } catch (e) {
+      // Rollback: re-fetch the list if the server call fails
+      getSelectedContacts().then(setContacts).catch(console.error)
+      alert('Failed to remove contact: ' + e.message)
+    }
+  }
+
   function SortHeader({ label, field }) {
     const active = sortField === field
     return (
@@ -122,6 +135,8 @@ export default function SelectedContacts() {
   return (
     <div className="space-y-4 w-full">
 
+      <Breadcrumb items={[{ label: 'Selected Contacts' }]} />
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -130,13 +145,19 @@ export default function SelectedContacts() {
             {loading ? 'Loading…' : `${contacts.length} contact${contacts.length !== 1 ? 's' : ''} shortlisted across ${firmCount} firm${firmCount !== 1 ? 's' : ''}`}
           </p>
         </div>
-        <button
-          onClick={handleExport}
-          disabled={exporting || contacts.length === 0}
-          className="btn-secondary disabled:opacity-40"
-        >
-          {exporting ? 'Exporting…' : '↓ Export CSV'}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={handleExport}
+            disabled={exporting || contacts.length === 0}
+            className="btn-primary disabled:opacity-40 flex items-center gap-2 px-5 py-2.5 text-base font-semibold shadow-md"
+          >
+            {exporting
+              ? <><span className="animate-spin inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full"></span> Exporting…</>
+              : <><span className="text-lg">⬇</span> Export CSV</>
+            }
+          </button>
+          <span className="text-2xs font-semibold text-qgray-400 uppercase tracking-wider">Final Step</span>
+        </div>
       </div>
 
       {/* Search */}
@@ -182,7 +203,9 @@ export default function SelectedContacts() {
                 <th className="px-4 py-3 text-center">
                   <SortHeader label="Score" field="score" />
                 </th>
-                <th className="px-4 py-3 w-20"></th>
+                <th className="px-4 py-3 w-32 text-right">
+                  <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -253,12 +276,23 @@ export default function SelectedContacts() {
                           ) : <span className="text-qgray-300">—</span>}
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          <button
-                            onClick={() => navigate(`/firms/${c.lp_firm_id}`)}
-                            className="text-xs text-qgreen-700 hover:text-qgreen-800 font-medium"
-                          >
-                            View →
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => navigate(`/firms/${c.lp_firm_id}`)}
+                              className="text-xs text-qgreen-700 hover:text-qgreen-800 font-medium whitespace-nowrap"
+                            >
+                              View →
+                            </button>
+                            {!isDynamo && (
+                              <button
+                                onClick={() => handleRemove(c.id)}
+                                className="text-xs px-2 py-1 rounded border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 hover:text-red-700 transition-colors whitespace-nowrap"
+                                title="Remove from shortlist — sends back to available contacts"
+                              >
+                                ✕ Remove
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )

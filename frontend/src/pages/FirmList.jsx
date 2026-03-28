@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getFirms, getOptions, getStats, getSettings, exportContacts } from '../api'
 import StatusBadge from '../components/StatusBadge'
+import Breadcrumb from '../components/Breadcrumb'
 
 function useDebounce(value, delay = 400) {
   const [debounced, setDebounced] = useState(value)
@@ -359,6 +360,8 @@ export default function FirmList() {
   return (
     <div className="space-y-4 h-full">
 
+      <Breadcrumb items={[{ label: 'LP Firms' }]} />
+
       {/* Stats bar */}
       <StatsBar stats={stats} />
 
@@ -420,9 +423,11 @@ export default function FirmList() {
             <button
               onClick={handleExport}
               disabled={exporting}
-              className="btn-secondary whitespace-nowrap"
+              className="btn-primary whitespace-nowrap flex items-center gap-1.5"
+              title="Export all shortlisted contacts to CSV — use this as the final step after completing all firm reviews"
             >
-              {exporting ? 'Exporting…' : '↓ Export CSV'}
+              <span>⬇</span>
+              {exporting ? 'Exporting…' : 'Export CSV'}
             </button>
           </div>
         </div>
