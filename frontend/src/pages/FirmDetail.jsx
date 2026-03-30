@@ -1,9 +1,22 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
-  getFirm, getFirmContacts, getFirms, updateContact, updateFirmStatus, getSettings, getStats,
+  getFirm, getFirmContacts, getFirms, updateContact, bulkUpdateContacts,
+  updateFirmStatus, getSettings, getStats,
 } from '../api'
 import StatusBadge from '../components/StatusBadge'
+import Breadcrumb from '../components/Breadcrumb'
+
+// Module-level cache for prefetched firm data — persists across navigations within this session
+const firmDataCache = new Map()
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+// Ensure a URL has a proper protocol prefix so it doesn't resolve relative to the app
+function normalizeUrl(url) {
+  if (!url) return null
+  if (/^https?:\/\//i.test(url)) return url
+  return 'https://' + url
+}
 
 // ── Inline icon components (no external file dependency) ──────────────────────
 function EmailIcon({ className = 'w-5 h-5' }) {
@@ -41,10 +54,14 @@ function Tooltip({ text, children }) {
 }
 
 // ── Single contact row in the Available tab ────────────────────────────────────
-function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxContacts }) {
+function AvailableContactRow({
+  contact, onToggle, onExclude, nonDynamoSelectedCount, maxContacts,
+  isChecked, onCheck, onSelectAllByTitle,
+}) {
   const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ')
   const isSelected = contact.is_selected === 1
   const isDynamo = contact.source === 'dynamo'
+  const [excluding, setExcluding] = useState(false)
 
   // Cap only applies to non-Dynamo contacts
   const atCap = !isDynamo && nonDynamoSelectedCount >= maxContacts && !isSelected
@@ -54,16 +71,49 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
     onToggle(contact.id, isSelected ? 0 : 1)
   }
 
+  async function handleExclude(e) {
+    e.stopPropagation()
+    if (!onExclude) return
+    setExcluding(true)
+    try { await onExclude(contact.id) }
+    finally { setExcluding(false) }
+  }
+
   return (
-    <tr className={`border-b transition-colors
-      ${isSelected || isDynamo
+    <tr className={`border-b transition-colors group
+      ${isChecked
+        ? 'bg-blue-50 border-blue-100'
+        : isSelected || isDynamo
         ? 'border-qgreen-100 bg-qgreen-50/40 hover:bg-qgreen-50'
         : 'border-qgray-100 hover:bg-qgray-50'}`}>
+
+      {/* Checkbox */}
+      <td className="px-3 py-3 w-8">
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={e => { e.stopPropagation(); onCheck(contact.id) }}
+          className="w-3.5 h-3.5 rounded border-qgray-300 text-qgreen-700 cursor-pointer accent-qgreen-700"
+        />
+      </td>
 
       {/* Name / Title */}
       <td className="px-4 py-3">
         <div className="font-medium text-sm text-qgray-900">{fullName || <span className="text-qgray-400">—</span>}</div>
-        {contact.job_title && <div className="text-xs text-qgray-500 mt-0.5">{contact.job_title}</div>}
+        {contact.job_title && (
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-xs text-qgray-500">{contact.job_title}</span>
+            {onSelectAllByTitle && contact.job_title && (
+              <button
+                onClick={e => { e.stopPropagation(); onSelectAllByTitle(contact.job_title) }}
+                title={`Select all contacts with title "${contact.job_title}"`}
+                className="opacity-0 group-hover:opacity-100 text-2xs text-qgray-400 hover:text-qgreen-700 border border-qgray-200 hover:border-qgreen-400 rounded px-1 py-0.5 transition-all whitespace-nowrap"
+              >
+                ⇑ all
+              </button>
+            )}
+          </div>
+        )}
       </td>
 
       {/* Source */}
@@ -93,7 +143,7 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
       <td className="px-4 py-3 text-center">
         {contact.linkedin_url
           ? <Tooltip text="View LinkedIn profile">
-              <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer"
+              <a href={normalizeUrl(contact.linkedin_url)} target="_blank" rel="noopener noreferrer"
                  onClick={e => e.stopPropagation()}
                  className="inline-flex items-center justify-center text-qgray-400 hover:text-[#0077B5] transition-colors">
                 <LinkedInIcon className="w-4 h-4" />
@@ -123,26 +173,39 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
               ✓ Auto-accepted
             </span>
           </Tooltip>
-        ) : isSelected ? (
-          <button
-            onClick={handleSelect}
-            className="text-xs px-3 py-1.5 rounded border border-qgreen-600 bg-qgreen-700 text-white font-semibold hover:bg-qgreen-800 active:bg-qgreen-900 transition-colors whitespace-nowrap"
-          >
-            ✓ Shortlisted
-          </button>
         ) : (
-          <Tooltip text={atCap ? `Cap of ${maxContacts} reached — remove another first.` : 'Add to shortlist'}>
-            <button
-              onClick={handleSelect}
-              disabled={atCap}
-              className={`text-xs px-3 py-1.5 rounded border font-medium transition-colors disabled:opacity-40 whitespace-nowrap
-                ${atCap
-                  ? 'border-qgray-200 text-qgray-300 cursor-not-allowed'
-                  : 'border-qgray-300 text-qgray-600 hover:border-qgreen-500 hover:text-qgreen-700 hover:bg-qgreen-50'}`}
-            >
-              + Shortlist
-            </button>
-          </Tooltip>
+          <div className="flex items-center justify-end gap-1.5">
+            {isSelected ? (
+              <button
+                onClick={handleSelect}
+                className="text-xs px-3 py-1.5 rounded border border-qgreen-600 bg-qgreen-700 text-white font-semibold hover:bg-qgreen-800 active:bg-qgreen-900 transition-colors whitespace-nowrap"
+              >
+                ✓ Shortlisted
+              </button>
+            ) : (
+              <Tooltip text={atCap ? `Cap of ${maxContacts} reached — remove another first.` : 'Add to shortlist'}>
+                <button
+                  onClick={handleSelect}
+                  disabled={atCap}
+                  className={`text-xs px-3 py-1.5 rounded border font-medium transition-colors disabled:opacity-40 whitespace-nowrap
+                    ${atCap
+                      ? 'border-qgray-200 text-qgray-300 cursor-not-allowed'
+                      : 'border-qgray-300 text-qgray-600 hover:border-qgreen-500 hover:text-qgreen-700 hover:bg-qgreen-50'}`}
+                >
+                  + Shortlist
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip text="Exclude this contact — removes them from the available list permanently.">
+              <button
+                onClick={handleExclude}
+                disabled={excluding}
+                className="text-xs px-2 py-1.5 rounded border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 hover:text-red-700 transition-colors disabled:opacity-40 whitespace-nowrap"
+              >
+                {excluding ? '…' : 'Exclude'}
+              </button>
+            </Tooltip>
+          </div>
         )}
       </td>
     </tr>
@@ -150,7 +213,7 @@ function AvailableContactRow({ contact, onToggle, nonDynamoSelectedCount, maxCon
 }
 
 // ── Contact row in the Under Review tab ───────────────────────────────────────
-function PendingContactRow({ contact, onStatusChange }) {
+function PendingContactRow({ contact, onStatusChange, isChecked, onCheck }) {
   const [saving, setSaving] = useState(false)
   const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ')
 
@@ -161,7 +224,17 @@ function PendingContactRow({ contact, onStatusChange }) {
   }
 
   return (
-    <tr className="border-b border-qgray-100 hover:bg-qgray-50">
+    <tr className={`border-b transition-colors
+      ${isChecked ? 'bg-blue-50 border-blue-100' : 'border-qgray-100 hover:bg-qgray-50'}`}>
+      {/* Checkbox */}
+      <td className="px-3 py-3 w-8">
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={e => { e.stopPropagation(); onCheck(contact.id) }}
+          className="w-3.5 h-3.5 rounded border-qgray-300 text-qgreen-700 cursor-pointer accent-qgreen-700"
+        />
+      </td>
       <td className="px-4 py-3">
         <div className="font-medium text-sm text-qgray-900">{fullName || <span className="text-qgray-400">—</span>}</div>
         {contact.job_title && <div className="text-xs text-qgray-500 mt-0.5">{contact.job_title}</div>}
@@ -178,7 +251,7 @@ function PendingContactRow({ contact, onStatusChange }) {
           </button>
           <button onClick={() => handleStatus('blacklisted')} disabled={saving}
             className="text-xs px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded hover:bg-red-100 transition-colors disabled:opacity-50">
-            Exclude
+            Reject
           </button>
         </div>
       </td>
@@ -204,6 +277,7 @@ function formatReviewed(isoStr) {
 export default function FirmDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [firm, setFirm]         = useState(null)
   const [contacts, setContacts] = useState([])
@@ -219,12 +293,89 @@ export default function FirmDetail() {
   const [sortField, setSortField]           = useState('score')
   const [sortDir, setSortDir]               = useState('desc')
 
+  // Multi-select state for bulk actions
+  const [selectedForAction, setSelectedForAction] = useState(new Set())
+  const [isBulkWorking, setIsBulkWorking] = useState(false)
+
   // Overall progress stats (fetched once on mount)
   const [stats, setStats] = useState(null)
+
+  // Pre-fetch the next firm to review in the background so "Done" is instant
+  const [nextFirm, setNextFirm] = useState(null)
+  const [transitioning, setTransitioning] = useState(false)
+
+  // Toast shown when arriving on this page right after saving the previous firm
+  const [savedFlash, setSavedFlash] = useState(null)
 
   useEffect(() => {
     getStats().then(setStats).catch(console.error)
   }, [])
+
+  // Show "saved" toast when arriving after marking a firm complete
+  useEffect(() => {
+    const savedName = location.state?.justSaved
+    if (savedName) {
+      setSavedFlash(savedName)
+      setTimeout(() => setSavedFlash(null), 3000)
+      // Clear from history state so a refresh doesn't re-show it
+      window.history.replaceState({}, '')
+    }
+  }, [location.state?.justSaved])
+
+  useEffect(() => {
+    let cancelled = false
+    async function prefetchNext() {
+      const statusPriority = ['needs_attention', 'in_progress', 'unreviewed']
+      const nextFirms = []
+
+      for (const status of statusPriority) {
+        if (cancelled || nextFirms.length >= 2) break
+        try {
+          const { firms: candidates } = await getFirms({
+            workflow_status: status,
+            per_page: 10,
+            sort_by: 'workflow_priority',
+            sort_dir: 'asc',
+          })
+          for (const f of candidates) {
+            if (nextFirms.length >= 2) break
+            if (
+              String(f.id) !== String(id) &&
+              (f.available_count > 0 || f.pending_count > 0) &&
+              !nextFirms.find(n => n.id === f.id)
+            ) {
+              nextFirms.push(f)
+            }
+          }
+        } catch { /* continue */ }
+      }
+
+      if (cancelled || nextFirms.length === 0) return
+
+      // Set the primary next firm for the "Next:" hint
+      setNextFirm(nextFirms[0])
+
+      // Pre-fetch full data (firm + contacts) for the next 2 firms so navigation is instant
+      for (const nextF of nextFirms) {
+        const key = String(nextF.id)
+        if (!firmDataCache.has(key)) {
+          Promise.all([getFirm(nextF.id), getFirmContacts(nextF.id), getSettings()])
+            .then(([f, c, s]) => {
+              if (!cancelled) {
+                firmDataCache.set(key, {
+                  firm: f,
+                  contacts: c,
+                  maxContacts: s.max_contacts_per_firm ? parseInt(s.max_contacts_per_firm, 10) : 5,
+                })
+              }
+            })
+            .catch(() => {}) // Silent — prefetch is best-effort
+        }
+      }
+    }
+    prefetchNext()
+    return () => { cancelled = true }
+  }, [id])
 
   function toggleSort(field) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -232,12 +383,42 @@ export default function FirmDetail() {
   }
 
   useEffect(() => {
+    // CRITICAL: always clear the Done overlay when arriving on any firm (incl. after navigation)
+    setStatusSaving(false)
+    setTransitioning(false)
+    setNextFirm(null) // reset so stale "Next:" hint isn't shown until prefetch finishes
+
+    // Helper: auto-complete a firm that has only Dynamo contacts (no manual review needed)
+    function maybeAutoComplete(f, c) {
+      if (f.workflow_status !== 'unreviewed') return f
+      const isDynamoOnly = c.length > 0 && c.every(contact => contact.source === 'dynamo')
+      if (!isDynamoOnly) return f
+      // Fire-and-forget; update local state optimistically
+      updateFirmStatus(f.id, 'complete').catch(console.error)
+      return { ...f, workflow_status: 'complete', workflow_completed_at: new Date().toISOString() }
+    }
+
+    // Serve from prefetch cache if available — makes navigation feel instant
+    const cached = firmDataCache.get(String(id))
+    if (cached) {
+      const autoF = maybeAutoComplete(cached.firm, cached.contacts)
+      setFirm(autoF)
+      setContacts(cached.contacts)
+      setMaxContacts(cached.maxContacts || 5)
+      setLoading(false)
+      firmDataCache.delete(String(id)) // consume the entry to free memory
+      return
+    }
+
+    setLoading(true)
+    setFirm(null)
     Promise.all([
       getFirm(id),
       getFirmContacts(id),
       getSettings(),
     ]).then(([f, c, s]) => {
-      setFirm(f)
+      const autoF = maybeAutoComplete(f, c)
+      setFirm(autoF)
       setContacts(c)
       if (s.max_contacts_per_firm) setMaxContacts(parseInt(s.max_contacts_per_firm, 10))
     }).catch(err => {
@@ -303,6 +484,25 @@ export default function FirmDetail() {
 
   const remainingSlots = Math.max(0, maxContacts - nonDynamoSelectedCount)
 
+  // Multi-select derived values
+  const allAvailableIds = useMemo(() => filteredAvailable.map(c => c.id), [filteredAvailable])
+  const allPendingIds   = useMemo(() => pendingContacts.map(c => c.id),   [pendingContacts])
+
+  const allAvailableSelected = allAvailableIds.length > 0 && allAvailableIds.every(id => selectedForAction.has(id))
+  const allPendingSelected   = allPendingIds.length > 0   && allPendingIds.every(id => selectedForAction.has(id))
+  const someAvailableSelected = allAvailableIds.some(id => selectedForAction.has(id))
+  const somePendingSelected   = allPendingIds.some(id => selectedForAction.has(id))
+
+  // Counts for the bulk action bar
+  const selectedAvailableCount = allAvailableIds.filter(id => selectedForAction.has(id)).length
+  const selectedPendingCount   = allPendingIds.filter(id => selectedForAction.has(id)).length
+
+  // Whether the selection contains at least one non-Dynamo contact (shortlist eligible)
+  const selectedContainNonDynamo = useMemo(() =>
+    filteredAvailable.some(c => selectedForAction.has(c.id) && c.source !== 'dynamo'),
+    [filteredAvailable, selectedForAction]
+  )
+
   // Optimistic update: flip the UI immediately, then sync with the server in the background.
   // If the server call fails, we roll back to the previous value.
   function handleToggle(contactId, value) {
@@ -318,38 +518,127 @@ export default function FirmDetail() {
 
   async function handleStatusChange(contactId, status) {
     await updateContact(contactId, { filter_status: status })
-    setContacts(cs => cs.map(c => c.id === contactId ? { ...c, filter_status: status } : c))
+    setContacts(cs => cs.map(c => c.id === contactId ? { ...c, filter_status: status, is_selected: 0 } : c))
   }
 
-  async function handleMarkComplete() {
-    setStatusSaving(true)
-    try {
-      await updateFirmStatus(id, 'complete')
-      setFirm(f => ({ ...f, workflow_status: 'complete', review_reason: null }))
+  async function handleExclude(contactId) {
+    await updateContact(contactId, { filter_status: 'blacklisted' })
+    setContacts(cs => cs.map(c => c.id === contactId ? { ...c, filter_status: 'blacklisted', is_selected: 0 } : c))
+  }
 
-      // Auto-advance: find the next firm to review, in priority order
-      const statusPriority = ['needs_attention', 'in_progress', 'unreviewed']
-      let navigated = false
-      for (const status of statusPriority) {
-        if (navigated) break
-        try {
-          const { firms: candidates } = await getFirms({
-            workflow_status: status,
-            per_page: 10,
-            sort_by: 'workflow_priority',
-            sort_dir: 'asc',
-          })
-          const next = candidates.find(
-            f => String(f.id) !== String(id) && (f.available_count > 0 || f.pending_count > 0)
-          )
-          if (next) { navigate(`/firms/${next.id}`); navigated = true }
-        } catch { /* continue trying next priority */ }
+  // ── Multi-select helpers ────────────────────────────────────────────────────
+  function toggleActionSelect(contactId) {
+    setSelectedForAction(prev => {
+      const next = new Set(prev)
+      if (next.has(contactId)) next.delete(contactId)
+      else next.add(contactId)
+      return next
+    })
+  }
+
+  function clearActionSelect() { setSelectedForAction(new Set()) }
+
+  function selectSection(contactIds) {
+    setSelectedForAction(prev => {
+      const ids = contactIds.map(c => c.id)
+      const allChecked = ids.every(id => prev.has(id))
+      const next = new Set(prev)
+      if (allChecked) ids.forEach(id => next.delete(id))
+      else ids.forEach(id => next.add(id))
+      return next
+    })
+  }
+
+  function handleSelectAllByTitle(title) {
+    // Select ALL contacts in the available list that have this exact job title
+    const ids = filteredAvailable
+      .filter(c => c.job_title === title)
+      .map(c => c.id)
+    setSelectedForAction(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => next.add(id))
+      return next
+    })
+  }
+
+  async function handleBulkShortlist() {
+    if (selectedForAction.size === 0 || isBulkWorking) return
+    setIsBulkWorking(true)
+    try {
+      const ids = filteredAvailable
+        .filter(c => selectedForAction.has(c.id) && c.source !== 'dynamo' && c.is_selected !== 1)
+        .map(c => c.id)
+      if (ids.length > 0) {
+        await bulkUpdateContacts({ contact_ids: ids, is_selected: 1 })
+        setContacts(cs => cs.map(c => ids.includes(c.id) ? { ...c, is_selected: 1 } : c))
+        if (firm?.workflow_status === 'unreviewed') {
+          setFirm(f => ({ ...f, workflow_status: 'in_progress' }))
+        }
       }
-      if (!navigated) navigate('/firms')
+      clearActionSelect()
     } catch (e) {
       alert('Error: ' + e.message)
     } finally {
-      setStatusSaving(false)
+      setIsBulkWorking(false)
+    }
+  }
+
+  async function handleBulkExclude() {
+    if (selectedForAction.size === 0 || isBulkWorking) return
+    setIsBulkWorking(true)
+    try {
+      const ids = [...selectedForAction]
+      await bulkUpdateContacts({ contact_ids: ids, filter_status: 'blacklisted' })
+      setContacts(cs => cs.map(c =>
+        selectedForAction.has(c.id) ? { ...c, filter_status: 'blacklisted', is_selected: 0 } : c
+      ))
+      clearActionSelect()
+    } catch (e) {
+      alert('Error: ' + e.message)
+    } finally {
+      setIsBulkWorking(false)
+    }
+  }
+
+  async function handleBulkPendingStatus(status) {
+    if (selectedForAction.size === 0 || isBulkWorking) return
+    setIsBulkWorking(true)
+    try {
+      const ids = [...selectedForAction]
+      await bulkUpdateContacts({ contact_ids: ids, filter_status: status })
+      setContacts(cs => cs.map(c =>
+        selectedForAction.has(c.id) ? { ...c, filter_status: status, is_selected: 0 } : c
+      ))
+      clearActionSelect()
+    } catch (e) {
+      alert('Error: ' + e.message)
+    } finally {
+      setIsBulkWorking(false)
+    }
+  }
+
+  async function handleMarkComplete() {
+    const currentId    = id
+    const currentName  = firm?.display_name || firm?.lp_name || 'Firm'
+    const targetFirm   = nextFirm
+
+    // Show the "✓ Done!" checkmark immediately — no waiting on the server
+    setTransitioning(true)
+    setStatusSaving(true)
+
+    // Fire save in the background — do NOT block navigation on it
+    updateFirmStatus(currentId, 'complete').catch(e => {
+      console.error('[FirmDetail] background save failed:', e)
+    })
+
+    // Brief visual flash so the user sees the success state
+    await new Promise(r => setTimeout(r, 350))
+
+    // Navigate immediately; pass the firm name so the next page can show a "saved" toast
+    if (targetFirm) {
+      navigate(`/firms/${targetFirm.id}`, { state: { justSaved: currentName } })
+    } else {
+      navigate('/firms')
     }
   }
 
@@ -388,23 +677,41 @@ export default function FirmDetail() {
   return (
     <div className="space-y-5 w-full">
 
-      {/* Full-page loading overlay — visible while saving & navigating to the next firm */}
+      {/* Full-page overlay — only shown during the brief "Done!" flash before navigating away */}
       {statusSaving && (
-        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-white/90 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="text-center">
-            <div className="w-12 h-12 border-4 border-qgreen-200 border-t-qgreen-700 rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-qgreen-800 font-semibold text-lg">Saving &amp; loading next firm…</p>
-            <p className="text-qgray-500 text-sm mt-1">This will only take a moment.</p>
+            <div className="w-14 h-14 rounded-full bg-qgreen-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
+              <span className="text-white text-2xl font-bold">✓</span>
+            </div>
+            <p className="text-qgreen-800 font-semibold text-lg">Firm complete!</p>
+            {nextFirm && (
+              <p className="text-qgray-500 text-sm mt-1">
+                Moving to <span className="font-medium text-qgray-700">{nextFirm.display_name || nextFirm.lp_name}</span>…
+              </p>
+            )}
           </div>
         </div>
       )}
 
-      {/* Back + progress strip */}
+      {/* "Saved" toast — shown after arriving here from marking a firm complete */}
+      {savedFlash && (
+        <div className="fixed top-5 right-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl border
+          bg-qgreen-50 border-qgreen-200 text-qgreen-800 shadow-lg text-sm font-medium animate-fade-in">
+          <span className="text-qgreen-600 text-base">✓</span>
+          <span>
+            <span className="font-semibold">{savedFlash}</span>
+            {' '}marked complete &amp; saved
+          </span>
+        </div>
+      )}
+
+      {/* Breadcrumb + progress strip */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <button onClick={() => navigate('/firms')}
-          className="text-sm text-qgray-500 hover:text-qgreen-700 flex items-center gap-1 font-medium transition-colors flex-shrink-0">
-          ← Back to firms
-        </button>
+        <Breadcrumb items={[
+          { label: 'LP Firms', to: '/firms' },
+          { label: firm.display_name || firm.lp_name },
+        ]} />
 
         {/* Overall progress tracker */}
         {pctComplete !== null && (
@@ -502,7 +809,7 @@ export default function FirmDetail() {
           </div>
 
           {/* Shortlist counter + action */}
-          <div className="flex items-center gap-5 flex-shrink-0">
+          <div className="flex items-center gap-5 flex-shrink-0 flex-col sm:flex-row items-end sm:items-center">
             {/* Counter — shows both dynamo and capped counts */}
             <div className="text-right">
               <Tooltip text={`${nonDynamoSelectedCount} manually shortlisted of ${maxContacts} cap · ${dynamoSelectedCount} Dynamo auto-accepted (not capped)`}>
@@ -530,13 +837,20 @@ export default function FirmDetail() {
                 {statusSaving ? 'Saving…' : 'Reopen'}
               </button>
             ) : (
-              <button
-                onClick={handleMarkComplete}
-                disabled={statusSaving}
-                className="btn-primary"
-              >
-                {statusSaving ? 'Saving…' : '✓ Done — Next Firm →'}
-              </button>
+              <div className="flex flex-col items-end gap-1">
+                <button
+                  onClick={handleMarkComplete}
+                  disabled={statusSaving}
+                  className="btn-primary"
+                >
+                  ✓ Done
+                </button>
+                {nextFirm && !statusSaving && (
+                  <span className="text-2xs text-qgray-400 whitespace-nowrap">
+                    Next: <span className="text-qgray-600 font-medium">{nextFirm.display_name || nextFirm.lp_name}</span>
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -548,7 +862,7 @@ export default function FirmDetail() {
         {/* Tab bar */}
         <div className="border-b border-qgray-200 px-4 flex items-center gap-0 bg-qgray-50">
           <button
-            onClick={() => setTab('available')}
+            onClick={() => { setTab('available'); clearActionSelect() }}
             className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap
               ${tab === 'available'
                 ? 'border-qgreen-700 text-qgreen-800'
@@ -564,7 +878,7 @@ export default function FirmDetail() {
           </button>
 
           <button
-            onClick={() => setTab('pending')}
+            onClick={() => { setTab('pending'); clearActionSelect() }}
             className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap
               ${tab === 'pending'
                 ? 'border-amber-500 text-amber-700'
@@ -643,10 +957,66 @@ export default function FirmDetail() {
               </div>
             </div>
 
+            {/* Bulk action bar — Available tab */}
+            {selectedAvailableCount > 0 && (
+              <div className="px-4 py-2.5 bg-qnavy-800 text-white flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-semibold">{selectedAvailableCount} selected</span>
+                <div className="flex items-center gap-2">
+                  {selectedContainNonDynamo && (
+                    <button
+                      onClick={handleBulkShortlist}
+                      disabled={isBulkWorking}
+                      className="text-xs px-3 py-1.5 rounded bg-qgreen-600 hover:bg-qgreen-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      ✓ Shortlist Selected
+                    </button>
+                  )}
+                  <button
+                    onClick={handleBulkExclude}
+                    disabled={isBulkWorking}
+                    className="text-xs px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    ✕ Exclude Selected
+                  </button>
+                </div>
+                <button
+                  onClick={clearActionSelect}
+                  className="ml-auto text-xs text-qnavy-300 hover:text-white transition-colors"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-qgray-50 border-b border-qgray-200">
+                    {/* Select-all checkbox */}
+                    <th className="px-3 py-2.5 w-8">
+                      <input
+                        type="checkbox"
+                        checked={allAvailableSelected}
+                        ref={el => { if (el) el.indeterminate = someAvailableSelected && !allAvailableSelected }}
+                        onChange={() => {
+                          if (allAvailableSelected) {
+                            setSelectedForAction(prev => {
+                              const next = new Set(prev)
+                              allAvailableIds.forEach(id => next.delete(id))
+                              return next
+                            })
+                          } else {
+                            setSelectedForAction(prev => {
+                              const next = new Set(prev)
+                              allAvailableIds.forEach(id => next.add(id))
+                              return next
+                            })
+                          }
+                        }}
+                        title="Select / deselect all visible contacts"
+                        className="w-3.5 h-3.5 rounded border-qgray-300 cursor-pointer accent-qgreen-700"
+                      />
+                    </th>
                     <th className="px-4 py-2.5 text-left">
                       <button onClick={() => toggleSort('name')}
                         className={`flex items-center gap-1 font-semibold text-2xs uppercase tracking-wider
@@ -675,13 +1045,13 @@ export default function FirmDetail() {
                         </button>
                       </Tooltip>
                     </th>
-                    <th className="px-4 py-2.5 w-36"></th>
+                    <th className="px-4 py-2.5 w-52"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredAvailable.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-10 text-qgray-400 text-sm">
+                      <td colSpan={7} className="text-center py-10 text-qgray-400 text-sm">
                         {availableContacts.length === 0
                           ? 'No available contacts for this firm.'
                           : 'No contacts match your filter.'}
@@ -693,6 +1063,16 @@ export default function FirmDetail() {
                       {filteredDynamo.length > 0 && (
                         <>
                           <tr>
+                            <td className="px-3 py-1.5 bg-purple-50 border-b border-purple-100 w-8">
+                              <input
+                                type="checkbox"
+                                checked={filteredDynamo.every(c => selectedForAction.has(c.id))}
+                                ref={el => { if (el) el.indeterminate = filteredDynamo.some(c => selectedForAction.has(c.id)) && !filteredDynamo.every(c => selectedForAction.has(c.id)) }}
+                                onChange={() => selectSection(filteredDynamo)}
+                                className="w-3.5 h-3.5 rounded border-purple-300 cursor-pointer accent-purple-600"
+                                title="Select/deselect all Dynamo contacts"
+                              />
+                            </td>
                             <td colSpan={6} className="px-4 py-1.5 bg-purple-50 border-b border-purple-100">
                               <span className="text-2xs font-semibold text-purple-700 uppercase tracking-wider">
                                 Dynamo — Auto-accepted · {filteredDynamo.length}
@@ -701,7 +1081,11 @@ export default function FirmDetail() {
                           </tr>
                           {filteredDynamo.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
-                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts} />
+                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
+                              onExclude={handleExclude}
+                              isChecked={selectedForAction.has(c.id)}
+                              onCheck={toggleActionSelect}
+                              onSelectAllByTitle={handleSelectAllByTitle} />
                           ))}
                         </>
                       )}
@@ -710,6 +1094,16 @@ export default function FirmDetail() {
                       {filteredSelected.length > 0 && (
                         <>
                           <tr>
+                            <td className="px-3 py-1.5 bg-qgreen-50 border-b border-qgreen-100 w-8">
+                              <input
+                                type="checkbox"
+                                checked={filteredSelected.every(c => selectedForAction.has(c.id))}
+                                ref={el => { if (el) el.indeterminate = filteredSelected.some(c => selectedForAction.has(c.id)) && !filteredSelected.every(c => selectedForAction.has(c.id)) }}
+                                onChange={() => selectSection(filteredSelected)}
+                                className="w-3.5 h-3.5 rounded border-qgreen-300 cursor-pointer accent-qgreen-700"
+                                title="Select/deselect all shortlisted contacts"
+                              />
+                            </td>
                             <td colSpan={6} className="px-4 py-1.5 bg-qgreen-50 border-b border-qgreen-100">
                               <span className="text-2xs font-semibold text-qgreen-700 uppercase tracking-wider">
                                 Shortlisted · {filteredSelected.length} / {maxContacts}
@@ -718,7 +1112,11 @@ export default function FirmDetail() {
                           </tr>
                           {filteredSelected.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
-                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts} />
+                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
+                              onExclude={handleExclude}
+                              isChecked={selectedForAction.has(c.id)}
+                              onCheck={toggleActionSelect}
+                              onSelectAllByTitle={handleSelectAllByTitle} />
                           ))}
                         </>
                       )}
@@ -728,6 +1126,16 @@ export default function FirmDetail() {
                         <>
                           {(filteredDynamo.length > 0 || filteredSelected.length > 0) && (
                             <tr>
+                              <td className="px-3 py-1.5 bg-qgray-50 border-b border-qgray-100 w-8">
+                                <input
+                                  type="checkbox"
+                                  checked={filteredUnselected.every(c => selectedForAction.has(c.id))}
+                                  ref={el => { if (el) el.indeterminate = filteredUnselected.some(c => selectedForAction.has(c.id)) && !filteredUnselected.every(c => selectedForAction.has(c.id)) }}
+                                  onChange={() => selectSection(filteredUnselected)}
+                                  className="w-3.5 h-3.5 rounded border-qgray-300 cursor-pointer accent-qgreen-700"
+                                  title="Select/deselect all available contacts"
+                                />
+                              </td>
                               <td colSpan={6} className="px-4 py-1.5 bg-qgray-50 border-b border-qgray-100">
                                 <span className="text-2xs font-semibold text-qgray-400 uppercase tracking-wider">
                                   Available · {filteredUnselected.length}
@@ -740,7 +1148,11 @@ export default function FirmDetail() {
                           )}
                           {filteredUnselected.map(c => (
                             <AvailableContactRow key={c.id} contact={c} onToggle={handleToggle}
-                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts} />
+                              nonDynamoSelectedCount={nonDynamoSelectedCount} maxContacts={maxContacts}
+                              onExclude={handleExclude}
+                              isChecked={selectedForAction.has(c.id)}
+                              onCheck={toggleActionSelect}
+                              onSelectAllByTitle={handleSelectAllByTitle} />
                           ))}
                         </>
                       )}
@@ -754,33 +1166,90 @@ export default function FirmDetail() {
 
         {/* Under Review tab content */}
         {tab === 'pending' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-qgray-50 border-b border-qgray-200">
-                  <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Name / Title</th>
-                  <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Email</th>
-                  <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Role tags</th>
-                  <th className="px-4 py-2.5 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingContacts.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="text-center py-10 text-qgray-400 text-sm">
-                      No contacts pending review for this firm.
-                    </td>
+          <>
+            {/* Bulk action bar — Pending tab */}
+            {selectedPendingCount > 0 && (
+              <div className="px-4 py-2.5 bg-qnavy-800 text-white flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-semibold">{selectedPendingCount} selected</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleBulkPendingStatus('approved')}
+                    disabled={isBulkWorking}
+                    className="text-xs px-3 py-1.5 rounded bg-qteal-600 hover:bg-qteal-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    ✓ Approve Selected
+                  </button>
+                  <button
+                    onClick={() => handleBulkPendingStatus('blacklisted')}
+                    disabled={isBulkWorking}
+                    className="text-xs px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    ✕ Reject Selected
+                  </button>
+                </div>
+                <button
+                  onClick={clearActionSelect}
+                  className="ml-auto text-xs text-qnavy-300 hover:text-white transition-colors"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-qgray-50 border-b border-qgray-200">
+                    {/* Select-all checkbox */}
+                    <th className="px-3 py-2.5 w-8">
+                      <input
+                        type="checkbox"
+                        checked={allPendingSelected}
+                        ref={el => { if (el) el.indeterminate = somePendingSelected && !allPendingSelected }}
+                        onChange={() => {
+                          if (allPendingSelected) {
+                            setSelectedForAction(prev => {
+                              const next = new Set(prev)
+                              allPendingIds.forEach(id => next.delete(id))
+                              return next
+                            })
+                          } else {
+                            setSelectedForAction(prev => {
+                              const next = new Set(prev)
+                              allPendingIds.forEach(id => next.add(id))
+                              return next
+                            })
+                          }
+                        }}
+                        title="Select / deselect all under-review contacts"
+                        className="w-3.5 h-3.5 rounded border-qgray-300 cursor-pointer accent-qgreen-700"
+                      />
+                    </th>
+                    <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Name / Title</th>
+                    <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Email</th>
+                    <th className="px-4 py-2.5 text-left font-semibold text-2xs uppercase tracking-wider text-qgray-500">Role tags</th>
+                    <th className="px-4 py-2.5 font-semibold text-2xs uppercase tracking-wider text-qgray-500">Action</th>
                   </tr>
-                ) : pendingContacts.map(c => (
-                  <PendingContactRow
-                    key={c.id}
-                    contact={c}
-                    onStatusChange={handleStatusChange}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pendingContacts.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-10 text-qgray-400 text-sm">
+                        No contacts pending review for this firm.
+                      </td>
+                    </tr>
+                  ) : pendingContacts.map(c => (
+                    <PendingContactRow
+                      key={c.id}
+                      contact={c}
+                      onStatusChange={handleStatusChange}
+                      isChecked={selectedForAction.has(c.id)}
+                      onCheck={toggleActionSelect}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
