@@ -26,11 +26,9 @@ export default function Layout() {
           {/* Brand + nav */}
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-3 flex-shrink-0">
-              <img
-                src="/quadria_Logo.jpg"
-                alt="Quadria Capital"
-                className="w-9 h-9 rounded-md flex-shrink-0"
-              />
+              <div className="w-8 h-8 rounded-lg bg-white/15 border border-white/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-display font-bold text-base leading-none select-none">Q</span>
+              </div>
               <div className="leading-tight">
                 <div className="text-white font-display font-bold text-sm tracking-tight">Quadria Capital</div>
                 <div className="text-green-200 text-2xs tracking-widest font-semibold uppercase">Internal LP Database</div>
