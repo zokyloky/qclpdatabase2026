@@ -106,15 +106,31 @@ export function deleteOutreach(id)    { return del(`/outreach/${id}`) }
 export function getSelectedContacts() { return get('/contacts/selected') }
 
 // ── Export ────────────────────────────────────────────────────────────────────
-export async function exportContacts() {
-  const blob = await get('/export/contacts')
-  const url  = URL.createObjectURL(blob)
-  const a    = document.createElement('a')
-  const date = new Date().toISOString().slice(0, 10)
-  a.href     = url
-  a.download = `selected_contacts_${date}.csv`
+
+function _triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a   = document.createElement('a')
+  a.href    = url
+  a.download = filename
+  document.body.appendChild(a)
   a.click()
+  document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+export async function exportContacts() {
+  const date = new Date().toISOString().slice(0, 10)
+
+  // Fetch both CSVs in parallel
+  const [contactsBlob, firmsBlob] = await Promise.all([
+    get('/export/contacts'),
+    get('/export/firms'),
+  ])
+
+  // Trigger both downloads (small delay between them so browsers don't block)
+  _triggerDownload(contactsBlob, `contacts_dynamo_${date}.csv`)
+  await new Promise(r => setTimeout(r, 300))
+  _triggerDownload(firmsBlob, `firms_preqin_${date}.csv`)
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────────

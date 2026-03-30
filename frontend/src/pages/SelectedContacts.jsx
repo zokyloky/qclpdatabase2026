@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getSelectedContacts, exportContacts, updateContact } from '../api'
 import Breadcrumb from '../components/Breadcrumb'
@@ -22,7 +22,6 @@ function EmailIcon({ className = 'w-4 h-4' }) {
   )
 }
 
-// Ensure URLs have a proper protocol prefix
 function normalizeUrl(url) {
   if (!url) return null
   if (/^https?:\/\//i.test(url)) return url
@@ -37,6 +36,8 @@ function LinkedInIcon({ className = 'w-4 h-4' }) {
   )
 }
 
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+
 export default function SelectedContacts() {
   const navigate = useNavigate()
   const [contacts, setContacts] = useState([])
@@ -45,8 +46,13 @@ export default function SelectedContacts() {
   const [search, setSearch]     = useState('')
   const [sortField, setSortField] = useState('firm')
   const [sortDir, setSortDir]   = useState('asc')
+  const [activeLetter, setActiveLetter] = useState(null)
 
   const debouncedSearch = useDebounce(search)
+
+  // Refs for each firm-group section by first letter
+  const letterRefs = useRef({})
+  const contentRef = useRef(null)
 
   useEffect(() => {
     setLoading(true)
@@ -98,19 +104,75 @@ export default function SelectedContacts() {
     return Array.from(map.values())
   }, [filtered])
 
+  // Build a set of letters that have at least one firm
+  const lettersWithFirms = useMemo(() => {
+    const set = new Set()
+    for (const group of grouped) {
+      const first = (group.firm_name || '').trim().toUpperCase()[0]
+      if (first) set.add(first)
+    }
+    return set
+  }, [grouped])
+
+  // Group firms by first letter for the sidebar jump targets
+  const groupedByLetter = useMemo(() => {
+    const map = new Map()
+    for (const group of grouped) {
+      const first = (group.firm_name || '').trim().toUpperCase()[0] || '#'
+      if (!map.has(first)) map.set(first, [])
+      map.get(first).push(group)
+    }
+    return map
+  }, [grouped])
+
+  // Track which letter is currently in view via IntersectionObserver
+  useEffect(() => {
+    if (loading) return
+    const observers = []
+    const visibleLetters = new Set()
+
+    ALPHABET.forEach(letter => {
+      const el = letterRefs.current[letter]
+      if (!el) return
+      const obs = new IntersectionObserver(
+        ([entry]) => {
+          if (entry.isIntersecting) {
+            visibleLetters.add(letter)
+          } else {
+            visibleLetters.delete(letter)
+          }
+          // Set active to the first visible letter alphabetically
+          if (visibleLetters.size > 0) {
+            setActiveLetter([...visibleLetters].sort()[0])
+          }
+        },
+        { root: null, threshold: 0.1 }
+      )
+      obs.observe(el)
+      observers.push(obs)
+    })
+
+    return () => observers.forEach(o => o.disconnect())
+  }, [loading, grouped])
+
+  function scrollToLetter(letter) {
+    const el = letterRefs.current[letter]
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+
   async function handleExport() {
     setExporting(true)
     try { await exportContacts() } catch (e) { alert(e.message) }
     finally { setExporting(false) }
   }
 
-  // Optimistically remove a contact from the shortlist and sync to the server
   async function handleRemove(contactId) {
     setContacts(cs => cs.filter(c => c.id !== contactId))
     try {
       await updateContact(contactId, { is_selected: 0 })
     } catch (e) {
-      // Rollback: re-fetch the list if the server call fails
       getSelectedContacts().then(setContacts).catch(console.error)
       alert('Failed to remove contact: ' + e.message)
     }
@@ -153,10 +215,10 @@ export default function SelectedContacts() {
           >
             {exporting
               ? <><span className="animate-spin inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full"></span> Exporting…</>
-              : <><span className="text-lg">⬇</span> Export CSV</>
+              : <><span className="text-lg">⬇</span> Export CSVs</>
             }
           </button>
-          <span className="text-2xs font-semibold text-qgray-400 uppercase tracking-wider">Final Step</span>
+          <span className="text-2xs font-semibold text-qgray-400 uppercase tracking-wider">Final Step — exports firms + contacts</span>
         </div>
       </div>
 
@@ -187,132 +249,183 @@ export default function SelectedContacts() {
           <p className="text-sm text-qgray-400">No contacts match your search.</p>
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-qgray-50 border-b border-qgray-200">
-                <th className="px-4 py-3 text-left w-24">
-                  <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Source</span>
-                </th>
-                <th className="px-4 py-3 text-left"><SortHeader label="Name" field="name" /></th>
-                <th className="px-4 py-3 text-left"><SortHeader label="Title" field="title" /></th>
-                <th className="px-4 py-3 text-center w-12">
-                  <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Email</span>
-                </th>
-                <th className="px-4 py-3 text-center w-12">
-                  <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">LinkedIn</span>
-                </th>
-                <th className="px-4 py-3 text-center">
-                  <SortHeader label="Score" field="score" />
-                </th>
-                <th className="px-4 py-3 w-32 text-right">
-                  <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {grouped.map(group => (
-                <>
-                  {/* Firm group header */}
-                  <tr key={`group-${group.lp_firm_id}`} className="bg-qgreen-50 border-b border-qgreen-100">
-                    <td colSpan={7} className="px-4 py-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          onClick={() => navigate(`/firms/${group.lp_firm_id}`)}
-                          className="font-semibold text-sm text-qgreen-800 hover:text-qgreen-600 hover:underline"
-                        >
-                          {group.firm_name}
-                        </button>
-                        {group.institution_type && (
-                          <span className="text-xs text-qgray-400">· {group.institution_type}</span>
-                        )}
-                        {group.country && (
-                          <span className="text-xs text-qgray-400">· {group.country}</span>
-                        )}
-                        <span className="ml-auto text-xs text-qgreen-700 font-semibold">
-                          {group.contacts.length} shortlisted
-                        </span>
-                      </div>
-                    </td>
+        <div className="flex gap-4 items-start">
+
+          {/* ── A–Z Sidebar ── */}
+          <aside className="sticky top-20 flex-shrink-0 w-7 flex flex-col items-center gap-0.5 select-none">
+            {ALPHABET.map(letter => {
+              const hasFirms  = lettersWithFirms.has(letter)
+              const isActive  = activeLetter === letter
+              return (
+                <button
+                  key={letter}
+                  onClick={() => hasFirms && scrollToLetter(letter)}
+                  disabled={!hasFirms}
+                  title={hasFirms ? `Jump to ${letter}` : `No firms starting with ${letter}`}
+                  className={`
+                    w-6 h-5 rounded text-2xs font-bold leading-none transition-all duration-150
+                    ${isActive
+                      ? 'bg-qgreen-700 text-white shadow-sm scale-110'
+                      : hasFirms
+                        ? 'text-qgreen-700 hover:bg-qgreen-50 hover:text-qgreen-800 cursor-pointer'
+                        : 'text-qgray-300 cursor-default opacity-40'
+                    }
+                  `}
+                >
+                  {letter}
+                </button>
+              )
+            })}
+          </aside>
+
+          {/* ── Main table ── */}
+          <div className="flex-1 min-w-0">
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-qgray-50 border-b border-qgray-200">
+                    <th className="px-4 py-3 text-left w-24">
+                      <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Source</span>
+                    </th>
+                    <th className="px-4 py-3 text-left"><SortHeader label="Name" field="name" /></th>
+                    <th className="px-4 py-3 text-left"><SortHeader label="Title" field="title" /></th>
+                    <th className="px-4 py-3 text-center w-12">
+                      <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Email</span>
+                    </th>
+                    <th className="px-4 py-3 text-center w-12">
+                      <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">LinkedIn</span>
+                    </th>
+                    <th className="px-4 py-3 text-center">
+                      <SortHeader label="Score" field="score" />
+                    </th>
+                    <th className="px-4 py-3 w-32 text-right">
+                      <span className="font-semibold text-2xs uppercase tracking-wider text-qgray-500">Actions</span>
+                    </th>
                   </tr>
-                  {/* Contact rows */}
-                  {group.contacts.map(c => {
-                    const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ')
-                    const isDynamo = c.source === 'dynamo'
+                </thead>
+                <tbody>
+                  {grouped.map(group => {
+                    const firstLetter = (group.firm_name || '').trim().toUpperCase()[0] || '#'
+                    // We attach the ref to the first group that starts with this letter
+                    const isFirstForLetter =
+                      groupedByLetter.has(firstLetter) &&
+                      groupedByLetter.get(firstLetter)[0].lp_firm_id === group.lp_firm_id
+
                     return (
-                      <tr key={c.id} className="border-b border-qgray-50 hover:bg-qgray-50 transition-colors">
-                        <td className="px-4 py-2.5">
-                          {isDynamo ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap">
-                              Dynamo
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap">
-                              Preqin
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <span className="font-medium text-qgray-900">{fullName || <span className="text-qgray-400">—</span>}</span>
-                        </td>
-                        <td className="px-4 py-2.5 text-qgray-500 text-xs">
-                          {c.job_title || <span className="text-qgray-300">—</span>}
-                        </td>
-                        <td className="px-4 py-2.5 text-center">
-                          {c.email
-                            ? <a href={`mailto:${c.email}`} title={c.email}
-                                 className="inline-flex items-center justify-center text-qgray-400 hover:text-qgreen-700 transition-colors">
-                                <EmailIcon />
-                              </a>
-                            : <span className="text-qgray-200">—</span>}
-                        </td>
-                        <td className="px-4 py-2.5 text-center">
-                          {c.linkedin_url
-                            ? <a href={normalizeUrl(c.linkedin_url)} target="_blank" rel="noopener noreferrer"
-                                 className="inline-flex items-center justify-center text-qgray-400 hover:text-[#0077B5] transition-colors">
-                                <LinkedInIcon />
-                              </a>
-                            : <span className="text-qgray-200">—</span>}
-                        </td>
-                        <td className="px-4 py-2.5 text-center">
-                          {c.filter_score != null ? (
-                            <span className={`text-sm font-semibold
-                              ${c.filter_score >= 80 ? 'text-qteal-700'
-                                : c.filter_score >= 60 ? 'text-amber-600' : 'text-qgray-500'}`}>
-                              {c.filter_score}
-                            </span>
-                          ) : <span className="text-qgray-300">—</span>}
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => navigate(`/firms/${c.lp_firm_id}`)}
-                              className="text-xs text-qgreen-700 hover:text-qgreen-800 font-medium whitespace-nowrap"
-                            >
-                              View →
-                            </button>
-                            {!isDynamo && (
+                      <>
+                        {/* Firm group header */}
+                        <tr
+                          key={`group-${group.lp_firm_id}`}
+                          ref={isFirstForLetter ? el => { letterRefs.current[firstLetter] = el } : null}
+                          className="bg-qgreen-50 border-b border-qgreen-100"
+                        >
+                          <td colSpan={7} className="px-4 py-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {/* Letter badge — shown only for the first firm of each letter */}
+                              {isFirstForLetter && (
+                                <span className="inline-flex items-center justify-center w-5 h-5 rounded text-2xs font-bold bg-qgreen-700 text-white flex-shrink-0">
+                                  {firstLetter}
+                                </span>
+                              )}
                               <button
-                                onClick={() => handleRemove(c.id)}
-                                className="text-xs px-2 py-1 rounded border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 hover:text-red-700 transition-colors whitespace-nowrap"
-                                title="Remove from shortlist — sends back to available contacts"
+                                onClick={() => navigate(`/firms/${group.lp_firm_id}`)}
+                                className="font-semibold text-sm text-qgreen-800 hover:text-qgreen-600 hover:underline"
                               >
-                                ✕ Remove
+                                {group.firm_name}
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                              {group.institution_type && (
+                                <span className="text-xs text-qgray-400">· {group.institution_type}</span>
+                              )}
+                              {group.country && (
+                                <span className="text-xs text-qgray-400">· {group.country}</span>
+                              )}
+                              <span className="ml-auto text-xs text-qgreen-700 font-semibold">
+                                {group.contacts.length} shortlisted
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                        {/* Contact rows */}
+                        {group.contacts.map(c => {
+                          const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ')
+                          const isDynamo = c.source === 'dynamo'
+                          return (
+                            <tr key={c.id} className="border-b border-qgray-50 hover:bg-qgray-50 transition-colors">
+                              <td className="px-4 py-2.5">
+                                {isDynamo ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap">
+                                    Dynamo
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap">
+                                    Preqin
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className="font-medium text-qgray-900">{fullName || <span className="text-qgray-400">—</span>}</span>
+                              </td>
+                              <td className="px-4 py-2.5 text-qgray-500 text-xs">
+                                {c.job_title || <span className="text-qgray-300">—</span>}
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                {c.email
+                                  ? <a href={`mailto:${c.email}`} title={c.email}
+                                       className="inline-flex items-center justify-center text-qgray-400 hover:text-qgreen-700 transition-colors">
+                                      <EmailIcon />
+                                    </a>
+                                  : <span className="text-qgray-200">—</span>}
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                {c.linkedin_url
+                                  ? <a href={normalizeUrl(c.linkedin_url)} target="_blank" rel="noopener noreferrer"
+                                       className="inline-flex items-center justify-center text-qgray-400 hover:text-[#0077B5] transition-colors">
+                                      <LinkedInIcon />
+                                    </a>
+                                  : <span className="text-qgray-200">—</span>}
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                {c.filter_score != null ? (
+                                  <span className={`text-sm font-semibold
+                                    ${c.filter_score >= 80 ? 'text-qteal-700'
+                                      : c.filter_score >= 60 ? 'text-amber-600' : 'text-qgray-500'}`}>
+                                    {c.filter_score}
+                                  </span>
+                                ) : <span className="text-qgray-300">—</span>}
+                              </td>
+                              <td className="px-4 py-2.5 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => navigate(`/firms/${c.lp_firm_id}`)}
+                                    className="text-xs text-qgreen-700 hover:text-qgreen-800 font-medium whitespace-nowrap"
+                                  >
+                                    View →
+                                  </button>
+                                  {!isDynamo && (
+                                    <button
+                                      onClick={() => handleRemove(c.id)}
+                                      className="text-xs px-2 py-1 rounded border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 hover:text-red-700 transition-colors whitespace-nowrap"
+                                      title="Remove from shortlist — sends back to available contacts"
+                                    >
+                                      ✕ Remove
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </>
                     )
                   })}
-                </>
-              ))}
-            </tbody>
-          </table>
+                </tbody>
+              </table>
 
-          <div className="px-4 py-3 border-t border-qgray-100 bg-qgray-50 text-xs text-qgray-400">
-            {filtered.length} contact{filtered.length !== 1 ? 's' : ''} across {grouped.length} firm{grouped.length !== 1 ? 's' : ''}
-            {debouncedSearch && ` · filtered from ${contacts.length} total`}
+              <div className="px-4 py-3 border-t border-qgray-100 bg-qgray-50 text-xs text-qgray-400">
+                {filtered.length} contact{filtered.length !== 1 ? 's' : ''} across {grouped.length} firm{grouped.length !== 1 ? 's' : ''}
+                {debouncedSearch && ` · filtered from ${contacts.length} total`}
+              </div>
+            </div>
           </div>
         </div>
       )}
