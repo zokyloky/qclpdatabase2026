@@ -36,7 +36,7 @@ function LinkedInIcon({ className = 'w-4 h-4' }) {
   )
 }
 
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+const ALPHABET = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')]
 
 export default function SelectedContacts() {
   const navigate = useNavigate()
@@ -104,23 +104,27 @@ export default function SelectedContacts() {
     return Array.from(map.values())
   }, [filtered])
 
-  // Build a set of letters that have at least one firm
+  // Normalize a firm name's first character to a sidebar key:
+  // A–Z letters map to themselves; anything else (numbers, symbols) maps to '#'
+  function firstKey(firmName) {
+    const ch = (firmName || '').trim().toUpperCase()[0] || ''
+    return /^[A-Z]$/.test(ch) ? ch : '#'
+  }
+
+  // Build a set of letters (incl. '#') that have at least one firm
   const lettersWithFirms = useMemo(() => {
     const set = new Set()
-    for (const group of grouped) {
-      const first = (group.firm_name || '').trim().toUpperCase()[0]
-      if (first) set.add(first)
-    }
+    for (const group of grouped) set.add(firstKey(group.firm_name))
     return set
   }, [grouped])
 
-  // Group firms by first letter for the sidebar jump targets
+  // Group firms by first letter (or '#') for the sidebar jump targets
   const groupedByLetter = useMemo(() => {
     const map = new Map()
     for (const group of grouped) {
-      const first = (group.firm_name || '').trim().toUpperCase()[0] || '#'
-      if (!map.has(first)) map.set(first, [])
-      map.get(first).push(group)
+      const key = firstKey(group.firm_name)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(group)
     }
     return map
   }, [grouped])
@@ -156,9 +160,24 @@ export default function SelectedContacts() {
   }, [loading, grouped])
 
   function scrollToLetter(letter) {
+    // '#' always scrolls to the very top; for other letters jump to the first
+    // firm starting with that letter (offset by sticky header height ~56px).
+    if (letter === '#') {
+      const el = letterRefs.current['#']
+      if (el) {
+        const offset = 72
+        const top = el.getBoundingClientRect().top + window.scrollY - offset
+        window.scrollTo({ top, behavior: 'smooth' })
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
+      return
+    }
     const el = letterRefs.current[letter]
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const offset = 72
+      const top = el.getBoundingClientRect().top + window.scrollY - offset
+      window.scrollTo({ top, behavior: 'smooth' })
     }
   }
 
@@ -255,18 +274,26 @@ export default function SelectedContacts() {
           <aside className="sticky top-20 flex-shrink-0 w-7 flex flex-col items-center gap-0.5 select-none">
             {ALPHABET.map(letter => {
               const hasFirms  = lettersWithFirms.has(letter)
+              // '#' is always enabled — clicking it scrolls to the top of the list
+              const isEnabled = hasFirms || letter === '#'
               const isActive  = activeLetter === letter
               return (
                 <button
                   key={letter}
-                  onClick={() => hasFirms && scrollToLetter(letter)}
-                  disabled={!hasFirms}
-                  title={hasFirms ? `Jump to ${letter}` : `No firms starting with ${letter}`}
+                  onClick={() => isEnabled && scrollToLetter(letter)}
+                  disabled={!isEnabled}
+                  title={
+                    letter === '#' && !hasFirms
+                      ? 'Scroll to top'
+                      : hasFirms
+                        ? `Jump to ${letter}`
+                        : `No firms starting with ${letter}`
+                  }
                   className={`
                     w-6 h-5 rounded text-2xs font-bold leading-none transition-all duration-150
                     ${isActive
                       ? 'bg-qgreen-700 text-white shadow-sm scale-110'
-                      : hasFirms
+                      : isEnabled
                         ? 'text-qgreen-700 hover:bg-qgreen-50 hover:text-qgreen-800 cursor-pointer'
                         : 'text-qgray-300 cursor-default opacity-40'
                     }
@@ -305,7 +332,7 @@ export default function SelectedContacts() {
                 </thead>
                 <tbody>
                   {grouped.map(group => {
-                    const firstLetter = (group.firm_name || '').trim().toUpperCase()[0] || '#'
+                    const firstLetter = firstKey(group.firm_name)
                     // We attach the ref to the first group that starts with this letter
                     const isFirstForLetter =
                       groupedByLetter.has(firstLetter) &&

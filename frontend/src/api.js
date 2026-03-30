@@ -130,7 +130,7 @@ export async function exportContacts() {
   // Trigger both downloads (small delay between them so browsers don't block)
   _triggerDownload(contactsBlob, `contacts_dynamo_${date}.csv`)
   await new Promise(r => setTimeout(r, 300))
-  _triggerDownload(firmsBlob, `firms_preqin_${date}.csv`)
+  _triggerDownload(firmsBlob, `firms_dynamo_${date}.csv`)
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────────

@@ -585,10 +585,13 @@ def _csv_response(rows: list, fieldnames: list, filename: str) -> StreamingRespo
 
 @app.get("/api/export/contacts", dependencies=[Depends(verify_token)])
 def export_selected_contacts(db=Depends(get_db)):
-    """Download shortlisted contacts as CSV in Dynamo format (one row per firm).
+    """Download shortlisted contacts as CSV in Dynamo contact format (one row per contact).
 
-    Columns mirror dynamo_original.csv exactly, with Preqin Firm ID and
-    Preqin Name appended so both identifiers are present.
+    Columns mirror dynamo_contact_template.xlsx exactly:
+    Dynamo Name | Preqin Firm ID | Preqin Name | Company Primary Country |
+    Company Primary City | Company Investor Category | Full name | First Name |
+    Email | Business Phone | Mobile phone | Company Last activity date |
+    Comments | Internal ID
 
     Includes both:
       - Preqin contacts manually shortlisted (is_selected = 1)
@@ -598,7 +601,90 @@ def export_selected_contacts(db=Depends(get_db)):
         cur.execute(
             """
             SELECT
+                f.display_name                                          AS dynamo_name,
+                f.preqin_firm_id,
+                f.lp_name                                               AS preqin_name,
+                f.country,
+                f.city,
+                f.institution_type,
+                TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, ''))
+                                                                        AS full_name,
+                c.first_name,
+                c.email,
+                f.last_activity_date,
+                f.comments,
+                f.dynamo_internal_id
+            FROM lp_contacts c
+            JOIN lp_firms f ON f.id = c.lp_firm_id
+            WHERE (c.is_selected = 1 OR c.filter_status = 'dynamo')
+              AND c.is_active = 1 AND f.is_active = 1
+            ORDER BY f.display_name, c.last_name, c.first_name
+            """
+        )
+        raw = cur.fetchall()
+
+    if not raw:
+        raise HTTPException(404, "No selected contacts found")
+
+    fieldnames = [
+        "Dynamo Name",
+        "Preqin Firm ID",
+        "Preqin Name",
+        "Company Primary Country",
+        "Company Primary City",
+        "Company Investor Category",
+        "Full name",
+        "First Name",
+        "Email",
+        "Business Phone",
+        "Mobile phone",
+        "Company Last activity date",
+        "Comments",
+        "Internal ID",
+    ]
+
+    rows = []
+    for r in raw:
+        rows.append({
+            "Dynamo Name":                  r["dynamo_name"] or "",
+            "Preqin Firm ID":               r["preqin_firm_id"] or "",
+            "Preqin Name":                  r["preqin_name"] or "",
+            "Company Primary Country":      r["country"] or "",
+            "Company Primary City":         r["city"] or "",
+            "Company Investor Category":    r["institution_type"] or "",
+            "Full name":                    r["full_name"] or "",
+            "First Name":                   r["first_name"] or "",
+            "Email":                        r["email"] or "",
+            "Business Phone":               "",
+            "Mobile phone":                 "",
+            "Company Last activity date":   r["last_activity_date"] or "",
+            "Comments":                     r["comments"] or "",
+            "Internal ID":                  r["dynamo_internal_id"] or "",
+        })
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    return _csv_response(rows, fieldnames, f"contacts_dynamo_{date_str}.csv")
+
+
+@app.get("/api/export/firms", dependencies=[Depends(verify_token)])
+def export_selected_firms(db=Depends(get_db)):
+    """Download the firms list as CSV in Dynamo firm format (one row per firm).
+
+    Columns mirror dyanmo_firm_template.csv exactly:
+    Name (ID) | Preqin Firm ID | Preqin Name | Investor status |
+    Total USD commitments | Funds - Active | Last activity date |
+    Investor category | Impact Investor | HQ Region | Primary Country |
+    Primary City | Primary contact | Comments | Contacts | Internal ID
+
+    Only includes firms that have at least one shortlisted/Dynamo contact.
+    """
+    with dict_cursor(db) as cur:
+        cur.execute(
+            """
+            SELECT
                 f.display_name                          AS firm_display_name,
+                f.preqin_firm_id,
+                f.lp_name                               AS preqin_name,
                 f.investor_status,
                 f.total_usd_commitments,
                 f.funds_active,
@@ -611,8 +697,6 @@ def export_selected_contacts(db=Depends(get_db)):
                 f.primary_contact,
                 f.comments,
                 f.dynamo_internal_id,
-                f.preqin_firm_id,
-                f.lp_name                               AS preqin_name,
                 STRING_AGG(
                     TRIM(
                         COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')
@@ -625,20 +709,23 @@ def export_selected_contacts(db=Depends(get_db)):
             WHERE (c.is_selected = 1 OR c.filter_status = 'dynamo')
               AND c.is_active = 1 AND f.is_active = 1
             GROUP BY
-                f.id, f.display_name, f.investor_status, f.total_usd_commitments,
+                f.id, f.display_name, f.preqin_firm_id, f.lp_name,
+                f.investor_status, f.total_usd_commitments,
                 f.funds_active, f.last_activity_date, f.institution_type, f.impact_investor,
                 f.region, f.country, f.city, f.primary_contact, f.comments,
-                f.dynamo_internal_id, f.preqin_firm_id, f.lp_name
+                f.dynamo_internal_id
             ORDER BY f.display_name
             """
         )
         raw = cur.fetchall()
 
     if not raw:
-        raise HTTPException(404, "No selected contacts found")
+        raise HTTPException(404, "No selected firms found")
 
     fieldnames = [
         "Name (ID)",
+        "Preqin Firm ID",
+        "Preqin Name",
         "Investor status",
         "Total USD commitments",
         "Funds - Active",
@@ -652,8 +739,6 @@ def export_selected_contacts(db=Depends(get_db)):
         "Comments",
         "Contacts",
         "Internal ID",
-        "Preqin Firm ID",
-        "Preqin Name",
     ]
 
     rows = []
@@ -662,6 +747,8 @@ def export_selected_contacts(db=Depends(get_db)):
         impact_str = "Impact" if impact_raw and str(impact_raw) not in ("0", "false", "False", "") else ""
         rows.append({
             "Name (ID)":              r["firm_display_name"] or "",
+            "Preqin Firm ID":         r["preqin_firm_id"] or "",
+            "Preqin Name":            r["preqin_name"] or "",
             "Investor status":        r["investor_status"] or "",
             "Total USD commitments":  r["total_usd_commitments"] or "",
             "Funds - Active":         r["funds_active"] or "",
@@ -675,77 +762,10 @@ def export_selected_contacts(db=Depends(get_db)):
             "Comments":               r["comments"] or "",
             "Contacts":               r["contacts_agg"] or "",
             "Internal ID":            r["dynamo_internal_id"] or "",
-            "Preqin Firm ID":         r["preqin_firm_id"] or "",
-            "Preqin Name":            r["preqin_name"] or "",
         })
 
     date_str = datetime.now().strftime("%Y-%m-%d")
-    return _csv_response(rows, fieldnames, f"contacts_dynamo_{date_str}.csv")
-
-
-@app.get("/api/export/firms", dependencies=[Depends(verify_token)])
-def export_selected_firms(db=Depends(get_db)):
-    """Download the firms list as CSV in Preqin format (one row per firm).
-
-    Columns mirror preqin_original.csv exactly.
-    Only includes firms that have at least one shortlisted/Dynamo contact.
-    """
-    with dict_cursor(db) as cur:
-        cur.execute(
-            """
-            SELECT DISTINCT
-                f.preqin_firm_id,
-                f.lp_name,
-                f.city,
-                f.country,
-                f.institution_type,
-                f.aum_usd_mn,
-                f.pe_allocation_usd_mn,
-                f.pe_target_allocation_usd_mn
-            FROM lp_firms f
-            JOIN lp_contacts c ON c.lp_firm_id = f.id
-            WHERE (c.is_selected = 1 OR c.filter_status = 'dynamo')
-              AND c.is_active = 1 AND f.is_active = 1
-            ORDER BY f.lp_name
-            """
-        )
-        raw = cur.fetchall()
-
-    if not raw:
-        raise HTTPException(404, "No selected firms found")
-
-    fieldnames = [
-        "FIRM ID",
-        "FIRM NAME",
-        "CITY",
-        "COUNTRY",
-        "FIRM TYPE",
-        "FUNDS COUNT",
-        "AUM (USD MN)",
-        "PE ALLOCATION (USD MN)",
-        "PE TARGET ALLOCATION (USD MN)",
-        "PE: TYPICAL INVESTMENT (USD MN - MIN)",
-        "PE: TYPICAL INVESTMENT (USD MN - MAX)",
-    ]
-
-    rows = []
-    for r in raw:
-        rows.append({
-            "FIRM ID":                           r["preqin_firm_id"] or "",
-            "FIRM NAME":                         r["lp_name"] or "",
-            "CITY":                              r["city"] or "",
-            "COUNTRY":                           r["country"] or "",
-            "FIRM TYPE":                         r["institution_type"] or "",
-            "FUNDS COUNT":                       "",
-            "AUM (USD MN)":                      r["aum_usd_mn"] if r["aum_usd_mn"] is not None else "",
-            "PE ALLOCATION (USD MN)":            r["pe_allocation_usd_mn"] if r["pe_allocation_usd_mn"] is not None else "",
-            "PE TARGET ALLOCATION (USD MN)":     r["pe_target_allocation_usd_mn"] if r["pe_target_allocation_usd_mn"] is not None else "",
-            "PE: TYPICAL INVESTMENT (USD MN - MIN)": "",
-            "PE: TYPICAL INVESTMENT (USD MN - MAX)": "",
-        })
-
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    return _csv_response(rows, fieldnames, f"firms_preqin_{date_str}.csv")
+    return _csv_response(rows, fieldnames, f"firms_dynamo_{date_str}.csv")
 
 
 @app.get("/api/contacts/selected", dependencies=[Depends(verify_token)])
@@ -1337,7 +1357,11 @@ if STATIC_DIR.exists():
 
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
-        # Serve index.html for all non-API routes (React Router handles them)
+        # Serve root-level static files (images, icons, manifests, etc.) if they exist
+        candidate = STATIC_DIR / full_path
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(str(candidate))
+        # Fall back to index.html for all other routes (React Router handles them)
         return FileResponse(str(STATIC_DIR / "index.html"))
 else:
     @app.get("/")

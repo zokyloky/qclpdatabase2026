@@ -27,7 +27,7 @@ export default function Layout() {
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-3 flex-shrink-0">
               <img
-                src="/quadria_Logo.jpg"
+                src="/quadria_logo.svg"
                 alt="Quadria Capital"
                 className="w-9 h-9 rounded-md flex-shrink-0"
               />
